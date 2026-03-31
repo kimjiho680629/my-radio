@@ -1,0 +1,20 @@
+{
+  "name": "MBC 표준FM LIVE",
+  "short_name": "MBC 라디오",
+  "start_url": "index.html",
+  "display": "standalone",
+  "background_color": "#0a0a0c",
+  "theme_color": "#0a0a0c",
+  "icons": [
+    {
+      "src": "https://i.ibb.co/hR8Nf8x/mbc-icon.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "https://i.ibb.co/hR8Nf8x/mbc-icon.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
