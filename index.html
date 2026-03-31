@@ -26,9 +26,19 @@
         .station-logo { width: 60px; height: 60px; background: linear-gradient(135deg, #007aff, #5856d6); border-radius: 16px; margin: 0 auto 15px; display: flex; justify-content: center; align-items: center; font-weight: 900; font-size: 1.1rem; }
         
         h1 { font-size: 1.4rem; margin: 0 0 4px 0; }
-        .location { font-size: 0.8rem; color: var(--text-sub); margin-bottom: 25px; display: flex; align-items: center; justify-content: center; gap: 5px; }
+        .location { font-size: 0.8rem; color: var(--text-sub); margin-bottom: 15px; display: flex; align-items: center; justify-content: center; gap: 5px; }
         .pulse { width: 6px; height: 6px; background: #34c759; border-radius: 50%; animation: p 2s infinite; }
         @keyframes p { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }
+
+        /* 데이터 정보 스타일 */
+        .data-info { 
+            display: flex; justify-content: center; gap: 15px; margin-bottom: 20px; 
+            font-family: 'SF Mono', Menlo, monospace; font-size: 0.65rem; color: var(--text-sub);
+            background: rgba(255,255,255,0.05); padding: 8px 15px; border-radius: 20px; width: fit-content; margin: 0 auto 25px;
+        }
+        .data-item { display: flex; align-items: center; gap: 4px; }
+        .data-label { opacity: 0.5; font-size: 0.55rem; }
+        .data-value { color: var(--primary); font-weight: bold; }
 
         .viz { display: flex; justify-content: center; align-items: center; gap: 4px; height: 35px; margin-bottom: 30px; }
         .bar { width: 4px; height: 6px; background: var(--primary); border-radius: 2px; transition: 0.3s; }
@@ -58,6 +68,11 @@
             <h1>표준FM</h1>
             <div class="location"><span class="pulse"></span> AUSTRALIA ⇄ KOREA</div>
             
+            <div class="data-info">
+                <div class="data-item"><span class="data-label">RATE</span> <span class="data-value" id="rate-val">0</span> <span class="data-label">kbps</span></div>
+                <div class="data-item"><span class="data-label">TOTAL</span> <span class="data-value" id="total-val">0.00</span> <span class="data-label">MB</span></div>
+            </div>
+
             <div class="viz" id="viz">
                 <div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div>
             </div>
@@ -97,6 +112,30 @@
 
         let idx = 0;
         let isPlaying = false;
+        let totalBytes = 0;
+        let lastTrackTime = 0;
+        const rateVal = document.getElementById('rate-val');
+        const totalVal = document.getElementById('total-val');
+
+        function trackData() {
+            if (!isPlaying || audio.paused) {
+                rateVal.innerText = "0";
+                lastTrackTime = 0;
+                return;
+            }
+            const now = Date.now();
+            if (lastTrackTime > 0) {
+                const delta = (now - lastTrackTime) / 1000;
+                // MBC 표준FM 스트리밍은 약 128kbps (초당 약 16KB)
+                const kbps = 128; 
+                const added = (kbps * 1024 / 8) * delta;
+                totalBytes += added;
+                rateVal.innerText = kbps;
+                totalVal.innerText = (totalBytes / (1024 * 1024)).toFixed(2);
+            }
+            lastTrackTime = now;
+        }
+        setInterval(trackData, 1000);
 
         async function start() {
             msg.innerText = `연결 중 (채널 ${idx + 1}/4)...`;
