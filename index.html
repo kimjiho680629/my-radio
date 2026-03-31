@@ -18,36 +18,38 @@
         
         .player-card { 
             background: var(--card); backdrop-filter: blur(40px); -webkit-backdrop-filter: blur(40px);
-            width: 90%; max-width: 380px; border-radius: 48px; padding: 40px 25px; text-align: center;
-            border: 1px solid rgba(255, 255, 255, 0.1); box-shadow: 0 40px 80px rgba(0,0,0,0.7);
+            width: 92%; max-width: 420px; border-radius: 54px; padding: 50px 30px; text-align: center;
+            border: 1px solid rgba(255, 255, 255, 0.1); box-shadow: 0 40px 100px rgba(0,0,0,0.8);
         }
 
-        .clocks { display: flex; justify-content: center; gap: 12px; margin-bottom: 20px; font-size: 0.7rem; color: #34c759; letter-spacing: 1px; }
-        .station-logo { width: 60px; height: 60px; background: linear-gradient(135deg, #007aff, #5856d6); border-radius: 16px; margin: 0 auto 15px; display: flex; justify-content: center; align-items: center; font-weight: 900; font-size: 1.1rem; }
+        .clocks { display: flex; justify-content: center; gap: 15px; margin-bottom: 25px; font-size: 0.85rem; color: #34c759; letter-spacing: 1.5px; font-weight: 600; }
+        .station-logo { width: 85px; height: 85px; background: linear-gradient(135deg, #007aff, #5856d6); border-radius: 22px; margin: 0 auto 20px; display: flex; justify-content: center; align-items: center; font-weight: 900; font-size: 1.5rem; box-shadow: 0 10px 20px rgba(0,122,255,0.3); }
         
-        h1 { font-size: 1.4rem; margin: 0 0 4px 0; }
-        .location { font-size: 0.8rem; color: var(--text-sub); margin-bottom: 15px; display: flex; align-items: center; justify-content: center; gap: 5px; }
-        .pulse { width: 6px; height: 6px; background: #34c759; border-radius: 50%; animation: p 2s infinite; }
-        @keyframes p { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }
+        h1 { font-size: 2rem; margin: 0 0 6px 0; font-weight: 800; letter-spacing: -0.5px; }
+        .location { font-size: 0.95rem; color: var(--text-sub); margin-bottom: 20px; display: flex; align-items: center; justify-content: center; gap: 7px; font-weight: 500; }
+        .pulse { width: 8px; height: 8px; background: #34c759; border-radius: 50%; animation: p 2s infinite; }
+        @keyframes p { 0% { opacity: 1; transform: scale(1); } 50% { opacity: 0.3; transform: scale(1.2); } 100% { opacity: 1; transform: scale(1); } }
 
         /* 데이터 정보 스타일 */
         .data-info { 
-            display: flex; justify-content: center; gap: 15px; margin-bottom: 20px; 
-            font-family: 'SF Mono', Menlo, monospace; font-size: 0.65rem; color: var(--text-sub);
-            background: rgba(255,255,255,0.05); padding: 8px 15px; border-radius: 20px; width: fit-content; margin: 0 auto 25px;
+            display: flex; justify-content: center; gap: 18px; margin-bottom: 30px; 
+            font-family: -apple-system, system-ui; font-size: 0.75rem; color: var(--text-sub);
+            background: rgba(255,255,255,0.08); padding: 10px 20px; border-radius: 25px; width: fit-content; margin: 0 auto 35px;
+            border: 1px solid rgba(255,255,255,0.05);
         }
-        .data-item { display: flex; align-items: center; gap: 4px; }
-        .data-label { opacity: 0.5; font-size: 0.55rem; }
-        .data-value { color: var(--primary); font-weight: bold; }
+        .data-item { display: flex; align-items: center; gap: 5px; }
+        .data-label { opacity: 0.6; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; }
+        .data-value { color: var(--primary); font-weight: 800; font-size: 0.85rem; }
 
-        .viz { display: flex; justify-content: center; align-items: center; gap: 4px; height: 35px; margin-bottom: 30px; }
-        .bar { width: 4px; height: 6px; background: var(--primary); border-radius: 2px; transition: 0.3s; }
+        .viz { display: flex; justify-content: center; align-items: center; gap: 5px; height: 45px; margin-bottom: 40px; }
+        .bar { width: 5px; height: 8px; background: var(--primary); border-radius: 3px; transition: 0.3s; }
         .playing .bar { animation: w 1.2s infinite ease-in-out; }
-        @keyframes w { 0%, 100% { height: 6px; } 50% { height: 35px; } }
+        @keyframes w { 0%, 100% { height: 8px; } 50% { height: 45px; } }
 
-        #play-btn { width: 80px; height: 80px; border-radius: 50%; border: none; background: white; cursor: pointer; display: flex; justify-content: center; align-items: center; margin: 0 auto; }
-        .play-icon { width: 0; height: 0; border-top: 12px solid transparent; border-bottom: 12px solid transparent; border-left: 20px solid black; margin-left: 5px; }
-        .pause-icon { width: 20px; height: 24px; display: none; gap: 5px; }
+        #play-btn { width: 95px; height: 95px; border-radius: 50%; border: none; background: white; cursor: pointer; display: flex; justify-content: center; align-items: center; margin: 0 auto; box-shadow: 0 15px 30px rgba(0,0,0,0.3); transition: transform 0.2s active; }
+        #play-btn:active { transform: scale(0.92); }
+        .play-icon { width: 0; height: 0; border-top: 15px solid transparent; border-bottom: 15px solid transparent; border-left: 25px solid black; margin-left: 8px; }
+        .pause-icon { width: 25px; height: 30px; display: none; gap: 7px; }
         .pause-icon::before, .pause-icon::after { content: ''; flex: 1; background: black; border-radius: 2px; }
         .is-playing .play-icon { display: none; }
         .is-playing .pause-icon { display: flex; }
