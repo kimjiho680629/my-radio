@@ -10,150 +10,132 @@
     <link rel="manifest" href="manifest.json">
     <link rel="apple-touch-icon" href="https://i.ibb.co/hR8Nf8x/mbc-icon.png">
     
-    <title>MBC 표준FM LIVE (AU Stability)</title>
+    <title>MBC Standard FM (Global Fix)</title>
     <style>
-        :root { --primary: #007aff; --bg: #0a0a0c; --card: rgba(28, 28, 30, 0.8); --text: #ffffff; --text-sub: #a1a1a6; }
+        :root { --primary: #007aff; --bg: #0a0a0c; --card: rgba(28, 28, 30, 0.85); --text: #ffffff; --text-sub: #a1a1a6; }
         * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
         body { margin: 0; padding: 0; font-family: -apple-system, sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; justify-content: center; align-items: center; overflow: hidden; }
-        .container { width: 100%; max-width: 400px; padding: 20px; text-align: center; }
         
         .player-card { 
-            background: var(--card); backdrop-filter: blur(30px); -webkit-backdrop-filter: blur(30px);
-            border-radius: 44px; padding: 45px 30px; border: 1px solid rgba(255, 255, 255, 0.12);
-            box-shadow: 0 30px 60px rgba(0,0,0,0.6);
+            background: var(--card); backdrop-filter: blur(40px); -webkit-backdrop-filter: blur(40px);
+            width: 90%; max-width: 380px; border-radius: 48px; padding: 40px 25px; text-align: center;
+            border: 1px solid rgba(255, 255, 255, 0.1); box-shadow: 0 40px 80px rgba(0,0,0,0.7);
         }
 
-        .clocks { display: flex; justify-content: center; gap: 15px; margin-bottom: 25px; font-size: 0.75rem; color: #34c759; font-weight: bold; }
+        .clocks { display: flex; justify-content: center; gap: 12px; margin-bottom: 20px; font-size: 0.7rem; color: #34c759; letter-spacing: 1px; }
+        .station-logo { width: 60px; height: 60px; background: linear-gradient(135deg, #007aff, #5856d6); border-radius: 16px; margin: 0 auto 15px; display: flex; justify-content: center; align-items: center; font-weight: 900; font-size: 1.1rem; }
         
-        .station-logo { width: 65px; height: 65px; background: linear-gradient(135deg, #007aff, #5856d6); border-radius: 18px; margin: 0 auto 15px; display: flex; justify-content: center; align-items: center; font-weight: 900; font-size: 1.2rem; box-shadow: 0 8px 16px rgba(0, 122, 255, 0.3); }
-        
-        h1 { font-size: 1.5rem; margin: 0 0 5px 0; }
-        .status-badge { font-size: 0.75rem; color: var(--text-sub); margin-bottom: 30px; display: inline-block; padding: 4px 12px; background: rgba(255,255,255,0.05); border-radius: 10px; }
-        
-        .visualizer { display: flex; justify-content: center; align-items: center; gap: 5px; height: 40px; margin-bottom: 35px; }
-        .bar { width: 4px; height: 8px; background: var(--primary); border-radius: 2px; }
-        .playing .bar { animation: wave 1.2s infinite ease-in-out; }
-        @keyframes wave { 0%, 100% { height: 8px; } 50% { height: 40px; } }
-        
-        #play-btn { width: 85px; height: 85px; border-radius: 50%; border: none; background: white; color: black; cursor: pointer; display: flex; justify-content: center; align-items: center; margin: 0 auto; transition: 0.3s; }
-        #play-btn:active { transform: scale(0.9); }
-        .play-icon { width: 0; height: 0; border-top: 13px solid transparent; border-bottom: 13px solid transparent; border-left: 22px solid black; margin-left: 6px; }
-        .pause-icon { width: 22px; height: 26px; display: none; gap: 6px; }
+        h1 { font-size: 1.4rem; margin: 0 0 4px 0; }
+        .location { font-size: 0.8rem; color: var(--text-sub); margin-bottom: 25px; display: flex; align-items: center; justify-content: center; gap: 5px; }
+        .pulse { width: 6px; height: 6px; background: #34c759; border-radius: 50%; animation: p 2s infinite; }
+        @keyframes p { 0% { opacity: 1; } 50% { opacity: 0.3; } 100% { opacity: 1; } }
+
+        .viz { display: flex; justify-content: center; align-items: center; gap: 4px; height: 35px; margin-bottom: 30px; }
+        .bar { width: 4px; height: 6px; background: var(--primary); border-radius: 2px; transition: 0.3s; }
+        .playing .bar { animation: w 1.2s infinite ease-in-out; }
+        @keyframes w { 0%, 100% { height: 6px; } 50% { height: 35px; } }
+
+        #play-btn { width: 80px; height: 80px; border-radius: 50%; border: none; background: white; cursor: pointer; display: flex; justify-content: center; align-items: center; margin: 0 auto; }
+        .play-icon { width: 0; height: 0; border-top: 12px solid transparent; border-bottom: 12px solid transparent; border-left: 20px solid black; margin-left: 5px; }
+        .pause-icon { width: 20px; height: 24px; display: none; gap: 5px; }
         .pause-icon::before, .pause-icon::after { content: ''; flex: 1; background: black; border-radius: 2px; }
-        
         .is-playing .play-icon { display: none; }
         .is-playing .pause-icon { display: flex; }
         .is-playing #play-btn { background: var(--primary); }
         .is-playing .pause-icon::before, .is-playing .pause-icon::after { background: white; }
 
-        #msg { margin-top: 25px; font-size: 0.85rem; color: #ff3b30; min-height: 1.2rem; }
-        .log-info { position: absolute; bottom: 20px; font-size: 0.65rem; color: rgba(255,255,255,0.2); width: 100%; left: 0; }
+        #msg { margin-top: 25px; font-size: 0.8rem; color: var(--text-sub); min-height: 1.5rem; }
+        #debug { position: absolute; bottom: 15px; font-size: 10px; color: rgba(255,255,255,0.15); width: 100%; left: 0; text-align: center; }
+        
+        button#retry-btn { margin-top: 10px; background: none; border: 1px solid rgba(255,255,255,0.2); color: var(--text-sub); padding: 5px 15px; border-radius: 15px; font-size: 11px; cursor: pointer; display: none; }
     </style>
 </head>
 <body>
     <div class="container">
-        <div class="clocks">
-            <span>SYD <span id="sydney-t">--:--</span></span>
-            <span style="opacity:0.3">|</span>
-            <span>SEL <span id="seoul-t">--:--</span></span>
-        </div>
+        <div class="clocks">SYD <span id="st">--:--</span> | SEL <span id="kt">--:--</span></div>
         <div class="player-card">
             <div class="station-logo">MBC</div>
             <h1>표준FM</h1>
-            <div class="status-badge" id="badge">AUSTRALIA ⇄ SEOUL</div>
+            <div class="location"><span class="pulse"></span> AUSTRALIA ⇄ KOREA</div>
             
-            <div class="visualizer" id="viz">
+            <div class="viz" id="viz">
                 <div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div>
             </div>
 
-            <button id="play-btn">
-                <div class="play-icon"></div>
-                <div class="pause-icon"></div>
-            </button>
-            <div id="msg" style="color: var(--text-sub);">버튼을 눌러 시작하세요</div>
+            <button id="play-btn"><div class="play-icon"></div><div class="pause-icon"></div></button>
+            <div id="msg">준비 완료</div>
+            <button id="retry-btn" onclick="location.reload()">수동 새로고침</button>
         </div>
     </div>
-    <div class="log-info" id="debug">System Ready</div>
+    <div id="debug">System Stable</div>
 
-    <audio id="radio" playsinline webkit-playsinline></audio>
+    <audio id="audio" playsinline webkit-playsinline></audio>
 
     <script>
-        const audio = document.getElementById('radio');
+        const audio = document.getElementById('audio');
         const btn = document.getElementById('play-btn');
         const msg = document.getElementById('msg');
         const viz = document.getElementById('viz');
         const debug = document.getElementById('debug');
 
         // 시계
-        function tick() {
-            const d = new Date();
+        function t() {
+            const now = new Date();
             const opt = { hour:'2-digit', minute:'2-digit', hour12:false };
-            document.getElementById('sydney-t').innerText = d.toLocaleTimeString('en-AU', { ...opt, timeZone:'Australia/Sydney'});
-            document.getElementById('seoul-t').innerText = d.toLocaleTimeString('ko-KR', { ...opt, timeZone:'Asia/Seoul'});
+            document.getElementById('st').innerText = now.toLocaleTimeString('en-AU', { ...opt, timeZone:'Australia/Sydney'});
+            document.getElementById('kt').innerText = now.toLocaleTimeString('ko-KR', { ...opt, timeZone:'Asia/Seoul'});
         }
-        setInterval(tick, 1000); tick();
+        setInterval(t, 1000); t();
 
-        // 스트림 설정 (가장 안정적인 순서대로)
+        // [핵심] 호주에서 접속 가능한 4개 소스
         const SOURCES = [
-            'https://minisw.imbc.com/dsfm/_definst_/sfm.stream/playlist.m3u8',
-            'https://sfm-hls.imbc.com/sfm/sfm.stream/playlist.m3u8',
-            'https://sminiplay.imbc.com/aacplay.ashx?agent=webapp&channel=sfm'
+            'https://mini-sfm.akamaized.net/sfm/sfm/playlist.m3u8', // 1. Akamai CDN (Global)
+            'https://sfm-hls.imbc.com/sfm/sfm.stream/playlist.m3u8', // 2. 본사 HLS
+            'https://stream.bsmbc.com/live/mp4:BusanMBC-LiveStream-AM/playlist.m3u8', // 3. 부산MBC (해외 우회용)
+            'https://5ddfd163bd00d.streamlock.net/STDFM/STDFM/playlist.m3u8' // 4. 울산MBC (비상용)
         ];
 
-        let currentSourceIdx = 0;
+        let idx = 0;
         let isPlaying = false;
 
-        async function fetchRealUrl(apiUrl) {
-            const proxies = [
-                'https://api.allorigins.win/raw?url=',
-                'https://corsproxy.io/?',
-                '' // 다이렉트 시도
-            ];
-            
-            for (let p of proxies) {
-                try {
-                    debug.innerText = `Trying proxy: ${p || 'Direct'}`;
-                    const res = await fetch(p + encodeURIComponent(apiUrl), { timeout: 5000 });
-                    const text = await res.text();
-                    const match = text.match(/https?:\/\/[^\s"]+\.m3u8[^\s"]*/);
-                    if (match) return match[0].replace('http://', 'https://');
-                } catch (e) { continue; }
-            }
-            return null;
-        }
-
-        async function playRadio() {
+        async function start() {
+            msg.innerText = `연결 중 (채널 ${idx + 1}/4)...`;
             msg.style.color = "var(--text-sub)";
-            msg.innerText = "연결 중 (호주 서버 경유)...";
             
             try {
-                let targetUrl = SOURCES[currentSourceIdx];
+                const url = SOURCES[idx];
+                debug.innerText = `Attempting: ${url.split('/')[2]}`;
                 
-                // 만약 ashx 주소(API)라면 실제 주소 추출 시도
-                if (targetUrl.includes('ashx')) {
-                    const realUrl = await fetchRealUrl(targetUrl);
-                    if (realUrl) targetUrl = realUrl;
-                }
-
-                debug.innerText = `Connecting to: ${targetUrl.substring(0, 40)}...`;
-                
-                audio.src = `${targetUrl}?t=${Date.now()}`;
+                audio.src = `${url}?t=${Date.now()}`;
                 audio.load();
                 
-                await audio.play();
-                
-                isPlaying = true;
-                btn.parentElement.classList.add('is-playing');
-                viz.classList.add('playing');
-                msg.innerText = "● LIVE 방송 중";
+                // 아이폰은 반드시 play()를 비동기로 기다려야 함
+                const playPromise = audio.play();
+                if (playPromise !== undefined) {
+                    await playPromise;
+                    isPlaying = true;
+                    document.body.classList.add('is-playing');
+                    viz.classList.add('playing');
+                    msg.innerText = "● 실시간 방송 중";
+                    msg.style.color = "#34c759";
+                    document.getElementById('retry-btn').style.display = "none";
+                }
             } catch (e) {
                 console.error(e);
+                next();
+            }
+        }
+
+        function next() {
+            idx++;
+            if (idx < SOURCES.length) {
+                msg.innerText = `채널 전환 중 (${idx + 1}/${SOURCES.length})...`;
+                setTimeout(start, 1500);
+            } else {
+                idx = 0; // 다시 처음부터
+                msg.innerText = "모든 경로 실패. 새로고침 하세요.";
                 msg.style.color = "#ff3b30";
-                msg.innerText = "연결 실패 - 다른 경로 시도 중";
-                
-                // 다음 소스로 전환하여 재시도
-                currentSourceIdx = (currentSourceIdx + 1) % SOURCES.length;
-                setTimeout(playRadio, 2000);
+                document.getElementById('retry-btn').style.display = "inline-block";
             }
         }
 
@@ -161,28 +143,23 @@
             if (isPlaying) {
                 audio.pause();
                 isPlaying = false;
-                btn.parentElement.classList.remove('is-playing');
+                document.body.classList.remove('is-playing');
                 viz.classList.remove('playing');
                 msg.innerText = "일시 정지됨";
             } else {
-                playRadio();
+                start();
             }
         };
 
-        // 아이폰 최적화 이벤트
-        audio.onwaiting = () => { if(isPlaying) msg.innerText = "데이터 수신 중 (Buffering)..."; };
-        audio.onplaying = () => { if(isPlaying) msg.innerText = "● LIVE 방송 중"; };
-        audio.onerror = () => {
-            if(isPlaying) {
-                msg.innerText = "끊김 발생 - 재연결 시도";
-                playRadio();
-            }
-        };
+        // 자동 복구 로직
+        audio.onwaiting = () => { if(isPlaying) msg.innerText = "버퍼링 중..."; };
+        audio.onplaying = () => { if(isPlaying) msg.innerText = "● 실시간 방송 중"; };
+        audio.onerror = () => { if(isPlaying) { debug.innerText = "Error detected, skipping..."; next(); } };
 
-        // 백그라운드 복귀 시 자동 재생
+        // 백그라운드 복귀 대응
         document.addEventListener('visibilitychange', () => {
             if (document.visibilityState === 'visible' && isPlaying && audio.paused) {
-                audio.play().catch(() => playRadio());
+                audio.play().catch(start);
             }
         });
     </script>
