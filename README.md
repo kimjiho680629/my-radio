@@ -1,36 +1,38 @@
-# 📻 MBC 표준FM LIVE (Australia Edition)
+# 📻 MBC 표준FM LIVE (Australia Edition) - Single File Pro
 
-호주에서 아이폰으로 한국 MBC 표준FM을 끊김 없이 청취할 수 있도록 설계된 전용 웹 앱입니다. 호주-한국 간의 네트워크 특성을 고려하여 해외 접속에 최적화된 스트리밍 경로와 자동 복구 로직이 적용되어 있습니다.
+호주에서 아이폰으로 한국 MBC 표준FM을 끊김 없이 청취할 수 있도록 최적화된 **단일 파일 기반** 웹 앱입니다. 호주-한국 간의 긴 네트워크 지연 시간을 극복하기 위해 특수 설계된 버퍼링 관리 로직이 적용되어 있습니다.
 
-## ✨ 주요 기능 및 최적화
-- **초고속 접속 (Instant Connect)**:
-    - `preconnect` 기술을 사용하여 스트리밍 서버(Akamai CDN 등)와 미리 연결을 형성합니다.
-    - 초기 접속 시 CDN 엣지 캐시를 활용하여 호주 내 가장 가까운 서버에서 데이터를 즉시 가져옵니다.
-- **4단계 자동 복구 (4-Layer Failover)**:
-    - 1순위: Akamai 글로벌 CDN (해외 접속 최적화)
-    - 2순위: iMBC 본사 HLS 직통 주소
-    - 3순위: 부산/울산 MBC 백업 채널
-    - 연결 끊김 시 200ms 내 즉각적인 채널 전환 시도.
-- **지능형 모니터링 (Smart Monitoring)**:
-    - **스톨(Stall) 감지**: 재생 중 소리가 멈추면 5초 내로 자동 재연결합니다.
-    - **실시간 데이터 표시**: 현재 전송 속도(kbps)와 누적 사용량(MB)을 실시간으로 확인 가능합니다.
-- **아이폰(iOS) 전용 UI/UX**:
+## 🚀 최신 업데이트 (2026-04-01)
+- **단일 파일 통합**: `index.html` 파일 하나만 있으면 모든 기능(HTML+CSS+JS)이 작동합니다.
+- **호주 네트워크 최적화**: AU-KR 간의 물리적 거리를 고려하여 버퍼링 대기 시간을 **6초**로 최적화 (잦은 채널 전환 방지).
+- **안정성 강화**: 어제 검증된 최상의 서버 경로를 우선 배치하고 스톨(멈춤) 감지 로직을 완화하여 끊김 없는 청취 환경 제공.
+
+## ✨ 주요 기능
+- **6단계 자동 복구 (6-Layer Failover)**:
+    - Akamai 글로벌 CDN, iMBC 본사(Mini/기본), 부산, 대구, 울산 MBC 서버를 순차적으로 연결.
+    - 연결 실패 시 다음 최적 서버로 자동 전환.
+- **라이브 엣지 점프 (Live Edge Tracking)**:
+    - 네트워크 흔들림으로 재생이 멈추면, 과거 데이터가 아닌 **현재 생방송 시점**으로 즉시 점프하여 복구.
+- **실시간 데이터 모니터링**:
+    - 현재 전송 속도(kbps)와 누적 데이터 사용량(MB)을 화면에서 즉시 확인.
+- **아이폰(iOS) 전용 디자인**:
     - Apple Music 스타일의 **글래스모피즘(Glassmorphism)** 다크 테마.
-    - 조작 편의성을 위해 버튼과 폰트 크기를 대폭 확대.
+    - 조작 편의를 위해 버튼과 폰트 크기를 대폭 확대.
     - 시드니(SYD)와 서울(SEL) 시간을 동시에 보여주는 **듀얼 시계**.
-    - PWA(Progressive Web App) 지원: 홈 화면 추가 시 전체 화면 앱 모드 지원.
+- **PWA 지원**: 홈 화면 추가 시 전체 화면 앱 모드로 실행 가능.
 
-## 🚀 사용 방법
-1. **아이폰 Safari** 브라우저에서 이 페이지에 접속합니다.
-2. 하단 중앙의 **[공유 버튼(사각형에 화살표)]**을 누릅니다.
+## 📲 사용 방법 (아이폰 권장)
+1. **아이폰 Safari** 브라우저에서 `index.html`이 호스팅된 주소에 접속합니다.
+2. 하단 중앙의 **[공유 버튼]**을 누릅니다.
 3. 메뉴에서 **[홈 화면에 추가]**를 선택합니다.
-4. 바탕화면의 **MBC 라디오** 아이콘을 터치하여 실행합니다.
+4. 바탕화면의 **MBC 라디오** 아이콘을 실행하여 감상합니다.
 
-## 🛠️ 기술적 특징
-- **No JS Framework**: 순수 Vanilla JS로 제작되어 가볍고 빠릅니다.
-- **Adaptive Bitrate**: MBC 표준FM 128kbps 고음질 스트리밍 지원.
-- **iOS Background Play**: Safari의 `playsinline` 속성 적용으로 백그라운드 재생 및 화면 꺼짐 대응.
+## 🛠️ 기술 사양
+- **파일 구조**: Single HTML File (Zero Dependency)
+- **스트리밍**: HLS (HTTP Live Streaming) - iOS Safari 네이티브 지원
+- **최적 비트레이트**: 128kbps 고음질 최적화
+- **로직**: 순수 Vanilla JS (프레임워크 없음)
 
 ---
-*Last Updated: 2026-04-01 (Connection Speed & Buffering Optimization)*
-*Optimized for iOS & Australia Edge Networks.*
+*Optimized for iOS Safari & Australia Edge Networks.*
+*Last Updated: 2026-04-01 (Stability & Performance Fix)*
