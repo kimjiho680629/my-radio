@@ -6,61 +6,12 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="MBC 라디오">
-    <meta name="theme-color" content="#0a0a0c">
+    <meta name="theme-color" content="#000000">
     <link rel="manifest" href="manifest.json">
     <link rel="apple-touch-icon" href="https://i.ibb.co/hR8Nf8x/mbc-icon.png">
     
-    <title>MBC Standard FM (Global Fix)</title>
-    <style>
-        :root { --primary: #007aff; --bg: #0a0a0c; --card: rgba(28, 28, 30, 0.85); --text: #ffffff; --text-sub: #a1a1a6; }
-        * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; }
-        body { margin: 0; padding: 0; font-family: -apple-system, sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; justify-content: center; align-items: center; overflow: hidden; }
-        
-        .player-card { 
-            background: var(--card); backdrop-filter: blur(40px); -webkit-backdrop-filter: blur(40px);
-            width: 92%; max-width: 420px; border-radius: 54px; padding: 50px 30px; text-align: center;
-            border: 1px solid rgba(255, 255, 255, 0.1); box-shadow: 0 40px 100px rgba(0,0,0,0.8);
-        }
-
-        .clocks { display: flex; justify-content: center; gap: 15px; margin-bottom: 25px; font-size: 0.85rem; color: #34c759; letter-spacing: 1.5px; font-weight: 600; }
-        .station-logo { width: 85px; height: 85px; background: linear-gradient(135deg, #007aff, #5856d6); border-radius: 22px; margin: 0 auto 20px; display: flex; justify-content: center; align-items: center; font-weight: 900; font-size: 1.5rem; box-shadow: 0 10px 20px rgba(0,122,255,0.3); }
-        
-        h1 { font-size: 2rem; margin: 0 0 6px 0; font-weight: 800; letter-spacing: -0.5px; }
-        .location { font-size: 0.95rem; color: var(--text-sub); margin-bottom: 20px; display: flex; align-items: center; justify-content: center; gap: 7px; font-weight: 500; }
-        .pulse { width: 8px; height: 8px; background: #34c759; border-radius: 50%; animation: p 2s infinite; }
-        @keyframes p { 0% { opacity: 1; transform: scale(1); } 50% { opacity: 0.3; transform: scale(1.2); } 100% { opacity: 1; transform: scale(1); } }
-
-        /* 데이터 정보 스타일 */
-        .data-info { 
-            display: flex; justify-content: center; gap: 18px; margin-bottom: 30px; 
-            font-family: -apple-system, system-ui; font-size: 0.75rem; color: var(--text-sub);
-            background: rgba(255,255,255,0.08); padding: 10px 20px; border-radius: 25px; width: fit-content; margin: 0 auto 35px;
-            border: 1px solid rgba(255,255,255,0.05);
-        }
-        .data-item { display: flex; align-items: center; gap: 5px; }
-        .data-label { opacity: 0.6; font-size: 0.6rem; font-weight: 700; text-transform: uppercase; }
-        .data-value { color: var(--primary); font-weight: 800; font-size: 0.85rem; }
-
-        .viz { display: flex; justify-content: center; align-items: center; gap: 5px; height: 45px; margin-bottom: 40px; }
-        .bar { width: 5px; height: 8px; background: var(--primary); border-radius: 3px; transition: 0.3s; }
-        .playing .bar { animation: w 1.2s infinite ease-in-out; }
-        @keyframes w { 0%, 100% { height: 8px; } 50% { height: 45px; } }
-
-        #play-btn { width: 95px; height: 95px; border-radius: 50%; border: none; background: white; cursor: pointer; display: flex; justify-content: center; align-items: center; margin: 0 auto; box-shadow: 0 15px 30px rgba(0,0,0,0.3); transition: transform 0.2s active; }
-        #play-btn:active { transform: scale(0.92); }
-        .play-icon { width: 0; height: 0; border-top: 15px solid transparent; border-bottom: 15px solid transparent; border-left: 25px solid black; margin-left: 8px; }
-        .pause-icon { width: 25px; height: 30px; display: none; gap: 7px; }
-        .pause-icon::before, .pause-icon::after { content: ''; flex: 1; background: black; border-radius: 2px; }
-        .is-playing .play-icon { display: none; }
-        .is-playing .pause-icon { display: flex; }
-        .is-playing #play-btn { background: var(--primary); }
-        .is-playing .pause-icon::before, .is-playing .pause-icon::after { background: white; }
-
-        #msg { margin-top: 25px; font-size: 0.8rem; color: var(--text-sub); min-height: 1.5rem; }
-        #debug { position: absolute; bottom: 15px; font-size: 10px; color: rgba(255,255,255,0.15); width: 100%; left: 0; text-align: center; }
-        
-        button#retry-btn { margin-top: 10px; background: none; border: 1px solid rgba(255,255,255,0.2); color: var(--text-sub); padding: 5px 15px; border-radius: 15px; font-size: 11px; cursor: pointer; display: none; }
-    </style>
+    <title>MBC Standard FM (Australia Edition)</title>
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <div class="container">
@@ -75,134 +26,30 @@
                 <div class="data-item"><span class="data-label">TOTAL</span> <span class="data-value" id="total-val">0.00</span> <span class="data-label">MB</span></div>
             </div>
 
-            <div class="viz" id="viz">
+            <div class="visualizer" id="visualizer">
                 <div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div><div class="bar"></div>
             </div>
 
-            <button id="play-btn"><div class="play-icon"></div><div class="pause-icon"></div></button>
+            <div class="controls">
+                <button id="play-btn">
+                    <div class="play-icon"></div>
+                    <div class="pause-icon"></div>
+                </button>
+                
+                <div class="volume-container">
+                    <span class="volume-icon">🔈</span>
+                    <input type="range" id="volume-slider" min="0" max="1" step="0.01" value="1">
+                    <span class="volume-icon">🔊</span>
+                </div>
+            </div>
+
             <div id="msg">준비 완료</div>
-            <button id="retry-btn" onclick="location.reload()">수동 새로고침</button>
+            <button id="retry-btn">다시 시도</button>
         </div>
     </div>
     <div id="debug">System Stable</div>
 
     <audio id="audio" playsinline webkit-playsinline></audio>
-
-    <script>
-        const audio = document.getElementById('audio');
-        const btn = document.getElementById('play-btn');
-        const msg = document.getElementById('msg');
-        const viz = document.getElementById('viz');
-        const debug = document.getElementById('debug');
-
-        // 시계
-        function t() {
-            const now = new Date();
-            const opt = { hour:'2-digit', minute:'2-digit', hour12:false };
-            document.getElementById('st').innerText = now.toLocaleTimeString('en-AU', { ...opt, timeZone:'Australia/Sydney'});
-            document.getElementById('kt').innerText = now.toLocaleTimeString('ko-KR', { ...opt, timeZone:'Asia/Seoul'});
-        }
-        setInterval(t, 1000); t();
-
-        // [핵심] 호주에서 접속 가능한 4개 소스
-        const SOURCES = [
-            'https://mini-sfm.akamaized.net/sfm/sfm/playlist.m3u8', // 1. Akamai CDN (Global)
-            'https://sfm-hls.imbc.com/sfm/sfm.stream/playlist.m3u8', // 2. 본사 HLS
-            'https://stream.bsmbc.com/live/mp4:BusanMBC-LiveStream-AM/playlist.m3u8', // 3. 부산MBC (해외 우회용)
-            'https://5ddfd163bd00d.streamlock.net/STDFM/STDFM/playlist.m3u8' // 4. 울산MBC (비상용)
-        ];
-
-        let idx = 0;
-        let isPlaying = false;
-        let totalBytes = 0;
-        let lastTrackTime = 0;
-        const rateVal = document.getElementById('rate-val');
-        const totalVal = document.getElementById('total-val');
-
-        function trackData() {
-            if (!isPlaying || audio.paused) {
-                rateVal.innerText = "0";
-                lastTrackTime = 0;
-                return;
-            }
-            const now = Date.now();
-            if (lastTrackTime > 0) {
-                const delta = (now - lastTrackTime) / 1000;
-                // MBC 표준FM 스트리밍은 약 128kbps (초당 약 16KB)
-                const kbps = 128; 
-                const added = (kbps * 1024 / 8) * delta;
-                totalBytes += added;
-                rateVal.innerText = kbps;
-                totalVal.innerText = (totalBytes / (1024 * 1024)).toFixed(2);
-            }
-            lastTrackTime = now;
-        }
-        setInterval(trackData, 1000);
-
-        async function start() {
-            msg.innerText = `연결 중 (채널 ${idx + 1}/4)...`;
-            msg.style.color = "var(--text-sub)";
-            
-            try {
-                const url = SOURCES[idx];
-                debug.innerText = `Attempting: ${url.split('/')[2]}`;
-                
-                audio.src = `${url}?t=${Date.now()}`;
-                audio.load();
-                
-                // 아이폰은 반드시 play()를 비동기로 기다려야 함
-                const playPromise = audio.play();
-                if (playPromise !== undefined) {
-                    await playPromise;
-                    isPlaying = true;
-                    document.body.classList.add('is-playing');
-                    viz.classList.add('playing');
-                    msg.innerText = "● 실시간 방송 중";
-                    msg.style.color = "#34c759";
-                    document.getElementById('retry-btn').style.display = "none";
-                }
-            } catch (e) {
-                console.error(e);
-                next();
-            }
-        }
-
-        function next() {
-            idx++;
-            if (idx < SOURCES.length) {
-                msg.innerText = `채널 전환 중 (${idx + 1}/${SOURCES.length})...`;
-                setTimeout(start, 1500);
-            } else {
-                idx = 0; // 다시 처음부터
-                msg.innerText = "모든 경로 실패. 새로고침 하세요.";
-                msg.style.color = "#ff3b30";
-                document.getElementById('retry-btn').style.display = "inline-block";
-            }
-        }
-
-        btn.onclick = () => {
-            if (isPlaying) {
-                audio.pause();
-                isPlaying = false;
-                document.body.classList.remove('is-playing');
-                viz.classList.remove('playing');
-                msg.innerText = "일시 정지됨";
-            } else {
-                start();
-            }
-        };
-
-        // 자동 복구 로직
-        audio.onwaiting = () => { if(isPlaying) msg.innerText = "버퍼링 중..."; };
-        audio.onplaying = () => { if(isPlaying) msg.innerText = "● 실시간 방송 중"; };
-        audio.onerror = () => { if(isPlaying) { debug.innerText = "Error detected, skipping..."; next(); } };
-
-        // 백그라운드 복귀 대응
-        document.addEventListener('visibilitychange', () => {
-            if (document.visibilityState === 'visible' && isPlaying && audio.paused) {
-                audio.play().catch(start);
-            }
-        });
-    </script>
+    <script src="app.js"></script>
 </body>
 </html>
