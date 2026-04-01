@@ -9,14 +9,11 @@
     <meta name="theme-color" content="#000000">
     <link rel="apple-touch-icon" href="https://i.ibb.co/hR8Nf8x/mbc-icon.png">
     
-    <!-- 해외 접속 및 저데이터 최적화 사전 연결 -->
     <link rel="preconnect" href="https://mini-sfm.akamaized.net">
     <link rel="preconnect" href="https://sfm-hls.imbc.com">
     <link rel="preconnect" href="https://minimw.imbc.com">
-    <link rel="preconnect" href="https://stream.bsmbc.com">
-    <link rel="preconnect" href="https://live.gjmbc.co.kr">
     
-    <title>MBC Standard FM (Australia Edition)</title>
+    <title>MBC Standard FM (Australia)</title>
     <style>
         :root {
             --primary: #007aff;
@@ -85,7 +82,7 @@
             <div id="msg">준비 완료</div>
         </div>
     </div>
-    <div id="debug">Optimized for Low-Data</div>
+    <div id="debug">System Stable</div>
 
     <audio id="audio" playsinline webkit-playsinline preload="auto"></audio>
 
@@ -102,16 +99,13 @@
             const stEl = document.getElementById('st');
             const ktEl = document.getElementById('kt');
 
-            // 저데이터 및 고안정성 서버 리스트 (지역 MBC 포함 8단계)
             const SOURCES = [
-                'https://mini-sfm.akamaized.net/sfm/sfm/playlist.m3u8', // 1. Akamai Global (최적)
-                'https://sfm-hls.imbc.com/sfm/sfm.stream/playlist.m3u8', // 2. 본사 기본
-                'https://minimw.imbc.com/dsfm/_definst_/sfm.stream/playlist.m3u8', // 3. 본사 Mini
-                'https://stream.bsmbc.com/live/mp4:BusanMBC-LiveStream-AM/playlist.m3u8', // 4. 부산
-                'https://live.gjmbc.co.kr/audio/_definst_/audio.stream/playlist.m3u8', // 5. 광주
-                'https://live.dgmbc.com/dgfm/dgfm.stream/playlist.m3u8', // 6. 대구
-                'https://live.jjmbc.co.kr/am/am.stream/playlist.m3u8', // 7. 전주
-                'https://5ddfd163bd00d.streamlock.net/STDFM/STDFM/playlist.m3u8' // 8. 울산
+                'https://mini-sfm.akamaized.net/sfm/sfm/playlist.m3u8',
+                'https://minimw.imbc.com/dsfm/_definst_/sfm.stream/playlist.m3u8',
+                'https://sfm-hls.imbc.com/sfm/sfm.stream/playlist.m3u8',
+                'https://stream.bsmbc.com/live/mp4:BusanMBC-LiveStream-AM/playlist.m3u8',
+                'https://live.dgmbc.com/dgfm/dgfm.stream/playlist.m3u8',
+                'https://5ddfd163bd00d.streamlock.net/STDFM/STDFM/playlist.m3u8'
             ];
 
             let idx = 0;
@@ -144,8 +138,8 @@
 
                 if (audio.currentTime === lastCurrentTime) {
                     stallCount++;
-                    if (stallCount >= 2) { // 2초간 멈추면 즉시 라이브 엣지 점프
-                        debug.innerText = "Stabilizing connection...";
+                    if (stallCount >= 5) { // 5초간 멈춤 시 복구 시도
+                        debug.innerText = "Connection stalled, recovering...";
                         jumpToLive();
                         stallCount = 0;
                     }
@@ -157,7 +151,7 @@
             function jumpToLive() {
                 try {
                     if (audio.seekable.length > 0) {
-                        audio.currentTime = audio.seekable.end(0) - 0.5;
+                        audio.currentTime = audio.seekable.end(0) - 1;
                         audio.play();
                     } else { start(); }
                 } catch(e) { start(); }
@@ -165,20 +159,17 @@
 
             async function start() {
                 clearTimeout(bufferTimeout);
-                msg.innerText = `최적 서버 검색 중 (${idx + 1}/8)...`;
+                msg.innerText = `연결 중 (${idx + 1}/${SOURCES.length})...`;
                 msg.style.color = "var(--text-sub)";
                 
                 try {
                     const url = SOURCES[idx];
-                    debug.innerText = `Route: ${new URL(url).hostname}`;
+                    debug.innerText = `Server: ${new URL(url).hostname}`;
                     
-                    audio.pause();
-                    audio.src = "";
-                    audio.load();
-                    
-                    // 네트워크 상태에 따라 캐시 무시 여부 결정
+                    // 무리한 초기화 대신 src 교체만 수행
                     const cacheBuster = idx > 0 ? `?t=${Date.now()}` : '';
                     audio.src = url + cacheBuster;
+                    audio.load();
                     
                     const playPromise = audio.play();
                     if (playPromise !== undefined) {
@@ -186,12 +177,16 @@
                         isPlaying = true;
                         updateUI(true);
                     }
-                } catch (e) { next(); }
+                } catch (e) {
+                    console.error(e);
+                    next();
+                }
             }
 
             function next() {
+                clearTimeout(bufferTimeout);
                 idx = (idx + 1) % SOURCES.length;
-                setTimeout(start, 100);
+                setTimeout(start, 500); // 다음 채널 시도 전 약간의 여유
             }
 
             function updateUI(playing) {
@@ -218,9 +213,13 @@
 
             audio.onwaiting = () => {
                 if (isPlaying) {
-                    msg.innerText = "저데이터 모드 전환 중...";
+                    msg.innerText = "버퍼링 중...";
                     clearTimeout(bufferTimeout);
-                    bufferTimeout = setTimeout(next, 2500); // 2.5초 이상 버퍼링 시 즉시 채널 전환
+                    // 6초간 기다려보고 안되면 다음 채널로 (호주 환경 고려)
+                    bufferTimeout = setTimeout(() => {
+                        debug.innerText = "Buffering timeout, switching...";
+                        next();
+                    }, 6000);
                 }
             };
 
