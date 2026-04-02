@@ -339,31 +339,53 @@
         const stEl       = document.getElementById('st');
         const ktEl       = document.getElementById('kt');
 
-        // ── 스트리밍 소스 (해외 접속 최적화 순) ──────────────
+        // ── 스트리밍 소스 ────────────────────────────────────────
+        //
+        // ★ 호주(시드니)에서 실측 테스트 결과 (2026-04-02, TPG Telecom):
+        //
+        //   [PRIMARY]  5ddfd163bd00d.streamlock.net  → 200 OK, 10/10 성공
+        //              TTFB ~2초, 다운로드 ~75 KB/s (128kbps 재생에 충분)
+        //              울산 MBC STDFM (표준FM 동일 콘텐츠) - 해외 접속 가능
+        //
+        //   [DEAD - 해외 차단됨]
+        //   mini-sfm.akamaized.net   → DNS 없음 (도메인 폐기)
+        //   sfm-hls.imbc.com         → DNS 없음 (한국 IP 전용)
+        //   minimw.imbc.com          → HTTP 400  (해외 IP 차단)
+        //   stream.bsmbc.com         → TCP 불가  (포트 차단)
+        //   live.dgmbc.com           → DNS 없음  (한국 IP 전용)
+        //
+        // ────────────────────────────────────────────────────────
+
         const SOURCES = [
-            'https://mini-sfm.akamaized.net/sfm/sfm/playlist.m3u8',              // 1. Akamai CDN (글로벌 최우선)
-            'https://sfm-hls.imbc.com/sfm/sfm.stream/playlist.m3u8',              // 2. iMBC 본사 HLS
-            'https://minimw.imbc.com/dsfm/_definst_/sfm.stream/playlist.m3u8',    // 3. iMBC 미니 HLS
-            'https://stream.bsmbc.com/live/mp4:BusanMBC-LiveStream-AM/playlist.m3u8', // 4. 부산 MBC
-            'https://live.dgmbc.com/dgfm/dgfm.stream/playlist.m3u8',              // 5. 대구 MBC
-            'https://5ddfd163bd00d.streamlock.net/STDFM/STDFM/playlist.m3u8',     // 6. 울산 MBC
+            // 1순위: 호주에서 유일하게 작동하는 서버 (Wowza/Streamlock, 해외 개방)
+            'https://5ddfd163bd00d.streamlock.net/STDFM/STDFM/playlist.m3u8',
+
+            // 2~6순위: 한국 내 접속 또는 향후 복구 대비 (현재 호주에서 불가)
+            'https://sfm-hls.imbc.com/sfm/sfm.stream/playlist.m3u8',
+            'https://minimw.imbc.com/dsfm/_definst_/sfm.stream/playlist.m3u8',
+            'https://mini-sfm.akamaized.net/sfm/sfm/playlist.m3u8',
+            'https://stream.bsmbc.com/live/mp4:BusanMBC-LiveStream-AM/playlist.m3u8',
+            'https://live.dgmbc.com/dgfm/dgfm.stream/playlist.m3u8',
         ];
 
-        const AUTO_RETRY_DELAY  = 30000; // 모든 소스 실패 후 자동 재시도 간격 (ms)
-        const BUFFER_TIMEOUT    =  9000; // 버퍼링 대기 한계 (호주-한국 거리 고려)
-        const STALL_JUMP_SEC    =     3; // N초 멈춤 → live edge 점프 시도
-        const STALL_SWITCH_SEC  =     9; // N초 멈춤 → 다음 소스 전환
+        // 1순위 서버는 연결 실패 시 바로 전환하지 않고 N회 재시도 (안정적이므로)
+        const PRIMARY_MAX_RETRY = 3;
+        const AUTO_RETRY_DELAY  = 20000; // 모든 소스 실패 후 자동 재시도 간격 (ms)
+        const BUFFER_TIMEOUT    = 10000; // 버퍼링 대기 한계 (TTFB ~2초 + 세그먼트 ~6초 + 여유)
+        const STALL_JUMP_SEC    =     4; // N초 멈춤 → live edge 점프 시도
+        const STALL_SWITCH_SEC  =    10; // N초 멈춤 → 다음 소스 전환
 
-        let hls           = null;
-        let srcIdx        = 0;
-        let userWantsPlay = false;   // 사용자 의도: true면 재연결 로직 활성화
-        let isLive        = false;   // 실제 오디오 재생 여부
-        let totalBytes    = 0;
-        let lastMs        = 0;
-        let lastAudioTime = -1;
-        let stallCount    = 0;
-        let bufferTimer   = null;
-        let autoRetryTimer= null;
+        let hls             = null;
+        let srcIdx          = 0;
+        let primaryRetry    = 0;     // 1순위 서버 재시도 횟수
+        let userWantsPlay   = false; // 사용자 의도: true면 재연결 로직 활성화
+        let isLive          = false; // 실제 오디오 재생 여부
+        let totalBytes      = 0;
+        let lastMs          = 0;
+        let lastAudioTime   = -1;
+        let stallCount      = 0;
+        let bufferTimer     = null;
+        let autoRetryTimer  = null;
 
         // ── 시계 ─────────────────────────────────────────────
         function tick() {
@@ -437,17 +459,19 @@
             if (typeof Hls !== 'undefined' && Hls.isSupported()) {
                 // ─ HLS.js 경로 (Chrome, Firefox, Edge 등) ─
                 hls = new Hls({
+                    // ★ 호주-한국 간 TTFB ~2초를 고려한 타임아웃 설정
                     liveSyncDurationCount:       2,   // 라이브 엣지 2세그먼트 이내 유지
-                    liveMaxLatencyDurationCount: 8,   // 최대 8세그먼트 지연 허용 후 점프
-                    manifestLoadingTimeOut:   8000,
-                    manifestLoadingMaxRetry:     1,
-                    levelLoadingTimeOut:      8000,
-                    levelLoadingMaxRetry:        1,
-                    fragLoadingTimeOut:       8000,
-                    fragLoadingMaxRetry:         2,
-                    maxBufferLength:            12,   // 버퍼 12초
-                    maxMaxBufferLength:         24,
-                    nudgeMaxRetry:               4,   // 멈춤 시 자동 넛지 횟수
+                    liveMaxLatencyDurationCount: 6,   // 최대 6세그먼트 지연 허용 후 점프
+                    manifestLoadingTimeOut:  12000,   // manifest: TTFB 2초 + 여유 10초
+                    manifestLoadingMaxRetry:     2,
+                    levelLoadingTimeOut:     12000,
+                    levelLoadingMaxRetry:        2,
+                    fragLoadingTimeOut:      12000,   // 세그먼트: 6초 길이 + 다운로드 3초 + 여유
+                    fragLoadingMaxRetry:         3,
+                    maxBufferLength:            15,   // 버퍼 15초 (세그먼트 2.5개)
+                    maxMaxBufferLength:         30,
+                    nudgeMaxRetry:               5,   // 멈춤 시 자동 넛지 횟수
+                    startFragPrefetch:         true,  // 첫 세그먼트 미리 로드
                 });
 
                 hls.loadSource(url);
@@ -482,16 +506,26 @@
         function tryNext() {
             if (!userWantsPlay) return;
             isLive = false;
+
+            // 1순위 서버(srcIdx===0)는 안정적이므로 바로 전환하지 않고 재시도
+            if (srcIdx === 0 && primaryRetry < PRIMARY_MAX_RETRY) {
+                primaryRetry++;
+                debug.innerText = `Primary retry ${primaryRetry}/${PRIMARY_MAX_RETRY}...`;
+                setTimeout(() => loadSource(0), 1500);
+                return;
+            }
+
+            primaryRetry = 0;
             srcIdx++;
             if (srcIdx < SOURCES.length) {
                 setTimeout(() => loadSource(srcIdx), 400);
             } else {
-                // 모든 소스 실패 → 30초 후 자동 재시도
+                // 모든 소스 실패 → 자동 재시도
                 srcIdx = 0;
-                setUI('error', '모든 서버 연결 실패 — 잠시 후 재시도합니다');
+                setUI('error', '연결 실패 — 잠시 후 재시도합니다');
                 retryBtn.style.display = 'inline-block';
                 autoRetryTimer = setTimeout(() => {
-                    if (userWantsPlay) loadSource(0);
+                    if (userWantsPlay) { primaryRetry = 0; loadSource(0); }
                 }, AUTO_RETRY_DELAY);
             }
         }
@@ -539,6 +573,7 @@
                 // 정지 중 → 재생
                 userWantsPlay = true;
                 srcIdx = 0;
+                primaryRetry = 0;
                 loadSource(0);
             }
         };
