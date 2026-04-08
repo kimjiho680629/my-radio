@@ -156,6 +156,17 @@
         /* ── 컨트롤 ── */
         .controls { display: flex; flex-direction: column; align-items: center; gap: 30px; }
 
+        .sub-btn {
+            width: 44px; height: 44px;
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid var(--card-border);
+            border-radius: 50%;
+            color: white; font-size: 1.1rem;
+            cursor: pointer; display: flex; align-items: center; justify-content: center;
+            transition: all 0.2s ease;
+        }
+        .sub-btn:active { transform: scale(0.9); background: rgba(255, 255, 255, 0.15); }
+
         /* ── 플레이 버튼 (3가지 상태) ── */
         #play-btn {
             width: 80px; height: 80px;
@@ -302,11 +313,15 @@
                 <div class="bar"></div>
             </div>
             <div class="controls">
-                <button id="play-btn">
-                    <div class="play-icon"></div>
-                    <div class="pause-icon"></div>
-                    <div class="spinner"></div>
-                </button>
+                <div style="display: flex; align-items: center; gap: 20px;">
+                    <button id="sync-btn" class="sub-btn" title="강제 동기화">🔄</button>
+                    <button id="play-btn">
+                        <div class="play-icon"></div>
+                        <div class="pause-icon"></div>
+                        <div class="spinner"></div>
+                    </button>
+                    <div style="width: 44px;"></div> <!-- 밸런스를 위한 더미 -->
+                </div>
                 <div class="volume-container">
                     <span class="volume-icon">🔈</span>
                     <input type="range" id="volume-slider" min="0" max="1" step="0.01" value="1">
@@ -336,6 +351,7 @@
         const rateVal    = document.getElementById('rate-val');
         const totalVal   = document.getElementById('total-val');
         const retryBtn   = document.getElementById('retry-btn');
+        const syncBtn    = document.getElementById('sync-btn');
         const stEl       = document.getElementById('st');
         const ktEl       = document.getElementById('kt');
 
@@ -371,9 +387,9 @@
         // 1순위 서버는 연결 실패 시 바로 전환하지 않고 N회 재시도 (안정적이므로)
         const PRIMARY_MAX_RETRY = 3;
         const AUTO_RETRY_DELAY  = 20000; // 모든 소스 실패 후 자동 재시도 간격 (ms)
-        const BUFFER_TIMEOUT    = 10000; // 버퍼링 대기 한계 (TTFB ~2초 + 세그먼트 ~6초 + 여유)
-        const STALL_JUMP_SEC    =     4; // N초 멈춤 → live edge 점프 시도
-        const STALL_SWITCH_SEC  =    10; // N초 멈춤 → 다음 소스 전환
+        const BUFFER_TIMEOUT    = 15000; // 버퍼링 대기 한계 (안정성을 위해 15초로 연장)
+        const STALL_JUMP_SEC    =     6; // N초 멈춤 → live edge 안전 마진 점프
+        const STALL_SWITCH_SEC  =    15; // N초 멈춤 → 다음 소스 전환 (성급한 전환 방지)
 
         let hls             = null;
         let srcIdx          = 0;
@@ -419,8 +435,11 @@
             if (audio.currentTime === lastAudioTime) {
                 stallCount++;
                 if (stallCount === STALL_JUMP_SEC) {
-                    debug.innerText = `Stall ×${STALL_JUMP_SEC} — jumping to live edge...`;
+                    debug.innerText = `Stall ×${STALL_JUMP_SEC} — jumping to live...`;
                     jumpToLive();
+                } else if (stallCount === STALL_JUMP_SEC + 5) { // 11초 지점
+                    debug.innerText = `Stall ×${STALL_JUMP_SEC + 5} — forced source reload...`;
+                    loadSource(srcIdx); // 현재 소스 강제 재연결 (세션 초기화)
                 } else if (stallCount >= STALL_SWITCH_SEC) {
                     debug.innerText = `Stall ×${STALL_SWITCH_SEC} — switching source...`;
                     stallCount = 0;
@@ -431,6 +450,14 @@
             }
             lastAudioTime = audio.currentTime;
         }, 1000);
+
+        // ── 수동 동기화 ──────────────────────────────────────
+        syncBtn.onclick = () => {
+            if (userWantsPlay) {
+                debug.innerText = 'Manual force reload triggered...';
+                loadSource(srcIdx);
+            }
+        };
 
         // ── HLS 초기화 ────────────────────────────────────────
         function destroyHls() {
@@ -459,19 +486,19 @@
             if (typeof Hls !== 'undefined' && Hls.isSupported()) {
                 // ─ HLS.js 경로 (Chrome, Firefox, Edge 등) ─
                 hls = new Hls({
-                    // ★ 호주-한국 간 TTFB ~2초를 고려한 타임아웃 설정
-                    liveSyncDurationCount:       2,   // 라이브 엣지 2세그먼트 이내 유지
-                    liveMaxLatencyDurationCount: 6,   // 최대 6세그먼트 지연 허용 후 점프
-                    manifestLoadingTimeOut:  12000,   // manifest: TTFB 2초 + 여유 10초
-                    manifestLoadingMaxRetry:     2,
-                    levelLoadingTimeOut:     12000,
-                    levelLoadingMaxRetry:        2,
-                    fragLoadingTimeOut:      12000,   // 세그먼트: 6초 길이 + 다운로드 3초 + 여유
-                    fragLoadingMaxRetry:         3,
-                    maxBufferLength:            15,   // 버퍼 15초 (세그먼트 2.5개)
-                    maxMaxBufferLength:         30,
-                    nudgeMaxRetry:               5,   // 멈춤 시 자동 넛지 횟수
-                    startFragPrefetch:         true,  // 첫 세그먼트 미리 로드
+                    // ★ 끊김 방지 최우선: 극단적 버퍼링 및 지연 허용 설정
+                    liveSyncDurationCount:       5,   // 라이브 엣지에서 5세그먼트(약 30초) 뒤에서 재생 (버퍼 확보)
+                    liveMaxLatencyDurationCount: 10,  // 최대 10세그먼트 지연 허용
+                    manifestLoadingTimeOut:  15000,
+                    manifestLoadingMaxRetry:     3,
+                    levelLoadingTimeOut:     15000,
+                    levelLoadingMaxRetry:        3,
+                    fragLoadingTimeOut:      15000,
+                    fragLoadingMaxRetry:         5,
+                    maxBufferLength:            60,   // 버퍼를 최대 60초 확보 (네트워크 불안정 대비)
+                    maxMaxBufferLength:        120,   // 메모리상 최대 버퍼 120초
+                    nudgeMaxRetry:               5,
+                    startFragPrefetch:         true,
                 });
 
                 hls.loadSource(url);
@@ -536,7 +563,10 @@
                 if (hls && hls.liveSyncPosition && isFinite(hls.liveSyncPosition)) {
                     audio.currentTime = hls.liveSyncPosition;
                 } else if (audio.seekable && audio.seekable.length > 0) {
-                    audio.currentTime = audio.seekable.end(0) - 0.5;
+                    // ★ 라이브 엣지에서 10초 뒤로 점프하여 즉각적인 버퍼링 확보 (끊김 방지)
+                    let target = audio.seekable.end(0) - 10;
+                    if (target < audio.seekable.start(0)) target = audio.seekable.start(0);
+                    audio.currentTime = target;
                 }
                 audio.play().catch(() => tryNext());
             } catch (e) {
