@@ -387,11 +387,12 @@
         // 1순위 서버는 연결 실패 시 바로 전환하지 않고 N회 재시도 (안정적이므로)
         const PRIMARY_MAX_RETRY = 3;
         const AUTO_RETRY_DELAY  = 20000; // 모든 소스 실패 후 자동 재시도 간격 (ms)
-        const BUFFER_TIMEOUT    = 10000; // 버퍼링 대기 한계 (빠른 복구를 위해 10초로 단축)
-        const STALL_JUMP_SEC    =     3; // N초 멈춤 → 안전 마진(-30초) 점프 (더 빨리 대응)
-        const STALL_RELOAD_SEC  =     7; // N초 멈춤 → 동일 소스 강제 재로드 (반복 현상 방지)
-        const STALL_SWITCH_SEC  =    12; // N초 멈춤 → 다음 소스 전환
-        const JUMP_MARGIN       =    30; // 라이브 엣지로부터의 지연 시간 (30초 확보로 안정성 극대화)
+        const BUFFER_TIMEOUT    = 10000; // 버퍼링 대기 한계
+        const STALL_JUMP_SEC    =     3; // N초 멈춤 → 안전 마진 점프
+        const STALL_RELOAD_SEC  =     8; // N초 멈춤 → 강제 재로드
+        const STALL_SWITCH_SEC  =    15; // N초 멈춤 → 다음 소스 전환
+        const JUMP_MARGIN       =    60; // 라이브 엣지로부터 60초 뒤에서 재생 (안정성 극대화)
+        const MIN_START_BUFFER  =    15; // 재생 시작 전 최소 15초 버퍼 확보 강제
 
         let hls             = null;
         let srcIdx          = 0;
@@ -488,26 +489,25 @@
             if (typeof Hls !== 'undefined' && Hls.isSupported()) {
                 // ─ HLS.js 경로 (Chrome, Firefox, Edge 등) ─
                 hls = new Hls({
-                    // ★ 끊김 방지 최우선: 극단적 버퍼링 및 지연 허용 설정
-                    liveSyncDurationCount:       5,   // 라이브 엣지에서 5세그먼트(약 30초) 뒤에서 재생 (버퍼 확보)
-                    liveMaxLatencyDurationCount: 10,  // 최대 10세그먼트 지연 허용
-                    manifestLoadingTimeOut:  15000,
-                    manifestLoadingMaxRetry:     3,
-                    levelLoadingTimeOut:     15000,
-                    levelLoadingMaxRetry:        3,
-                    fragLoadingTimeOut:      15000,
-                    fragLoadingMaxRetry:         5,
-                    maxBufferLength:            60,   // 버퍼를 최대 60초 확보 (네트워크 불안정 대비)
-                    maxMaxBufferLength:        120,   // 메모리상 최대 버퍼 120초
-                    nudgeMaxRetry:               5,
+                    // ★ v1.4.0 울트라 버퍼링: 극단적 대기 모드
+                    liveSyncDurationCount:       10,  // 10세그먼트(약 60초) 뒤에서 재생 시작
+                    liveMaxLatencyDurationCount: 15,
+                    maxBufferLength:            180,  // 3분 동안 끊겨도 재생 가능하게 버퍼 확보
+                    maxMaxBufferLength:         600,  // 최대 10분까지 버퍼링 허용
+                    backBufferLength:            10,  // 지나간 데이터는 빠르게 삭제 (메모리 보호)
+                    manifestLoadingTimeOut:   20000,
+                    levelLoadingTimeOut:      20000,
+                    fragLoadingTimeOut:       20000,
+                    fragLoadingMaxRetry:         10,
                     startFragPrefetch:         true,
                 });
 
                 hls.loadSource(url);
                 hls.attachMedia(audio);
 
-                hls.once(Hls.Events.MANIFEST_PARSED, () => {
-                    audio.play().catch(() => tryNext());
+                hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                    // 바로 재생하지 않고 버퍼가 쌓일 때까지 3초만 더 기다림
+                    setTimeout(() => { if (userWantsPlay) audio.play().catch(() => tryNext()); }, 3000);
                 });
 
                 hls.on(Hls.Events.ERROR, (_, data) => {
@@ -563,15 +563,16 @@
         function jumpToLive() {
             try {
                 if (hls && hls.liveSyncPosition && isFinite(hls.liveSyncPosition)) {
-                    // HLS.js: 설정된 지연 시간만큼 뒤로 점프 (약 30초)
+                    // HLS.js: 설정된 지연 시간만큼 뒤로 점프 (약 60초)
                     audio.currentTime = hls.liveSyncPosition;
                 } else if (audio.seekable && audio.seekable.length > 0) {
-                    // iOS 네이티브: 라이브 엣지에서 JUMP_MARGIN(30초) 만큼 뒤로 점프하여 넉넉한 버퍼 확보
+                    // iOS 네이티브: 라이브 엣지에서 JUMP_MARGIN(60초) 만큼 뒤로 점프하여 넉넉한 버퍼 확보
                     let target = audio.seekable.end(0) - JUMP_MARGIN;
                     if (target < audio.seekable.start(0)) target = audio.seekable.start(0);
                     audio.currentTime = target;
                 }
-                audio.play().catch(() => tryNext());
+                // 재생 시도 전 2초간 더 대기하여 버퍼를 조금이라도 더 채움
+                setTimeout(() => { if (userWantsPlay) audio.play().catch(() => tryNext()); }, 2000);
             } catch (e) {
                 tryNext();
             }
