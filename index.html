@@ -387,9 +387,11 @@
         // 1순위 서버는 연결 실패 시 바로 전환하지 않고 N회 재시도 (안정적이므로)
         const PRIMARY_MAX_RETRY = 3;
         const AUTO_RETRY_DELAY  = 20000; // 모든 소스 실패 후 자동 재시도 간격 (ms)
-        const BUFFER_TIMEOUT    = 15000; // 버퍼링 대기 한계 (안정성을 위해 15초로 연장)
-        const STALL_JUMP_SEC    =     6; // N초 멈춤 → live edge 안전 마진 점프
-        const STALL_SWITCH_SEC  =    15; // N초 멈춤 → 다음 소스 전환 (성급한 전환 방지)
+        const BUFFER_TIMEOUT    = 10000; // 버퍼링 대기 한계 (빠른 복구를 위해 10초로 단축)
+        const STALL_JUMP_SEC    =     3; // N초 멈춤 → 안전 마진(-30초) 점프 (더 빨리 대응)
+        const STALL_RELOAD_SEC  =     7; // N초 멈춤 → 동일 소스 강제 재로드 (반복 현상 방지)
+        const STALL_SWITCH_SEC  =    12; // N초 멈춤 → 다음 소스 전환
+        const JUMP_MARGIN       =    30; // 라이브 엣지로부터의 지연 시간 (30초 확보로 안정성 극대화)
 
         let hls             = null;
         let srcIdx          = 0;
@@ -435,11 +437,11 @@
             if (audio.currentTime === lastAudioTime) {
                 stallCount++;
                 if (stallCount === STALL_JUMP_SEC) {
-                    debug.innerText = `Stall ×${STALL_JUMP_SEC} — jumping to live...`;
+                    debug.innerText = `Stall ×${STALL_JUMP_SEC} — buffering (jump -30s)...`;
                     jumpToLive();
-                } else if (stallCount === STALL_JUMP_SEC + 5) { // 11초 지점
-                    debug.innerText = `Stall ×${STALL_JUMP_SEC + 5} — forced source reload...`;
-                    loadSource(srcIdx); // 현재 소스 강제 재연결 (세션 초기화)
+                } else if (stallCount === STALL_RELOAD_SEC) {
+                    debug.innerText = `Stall ×${STALL_RELOAD_SEC} — force reload...`;
+                    loadSource(srcIdx); // 7초 멈춤 시 세션 강제 초기화 (소리 반복 방지)
                 } else if (stallCount >= STALL_SWITCH_SEC) {
                     debug.innerText = `Stall ×${STALL_SWITCH_SEC} — switching source...`;
                     stallCount = 0;
@@ -561,10 +563,11 @@
         function jumpToLive() {
             try {
                 if (hls && hls.liveSyncPosition && isFinite(hls.liveSyncPosition)) {
+                    // HLS.js: 설정된 지연 시간만큼 뒤로 점프 (약 30초)
                     audio.currentTime = hls.liveSyncPosition;
                 } else if (audio.seekable && audio.seekable.length > 0) {
-                    // ★ 라이브 엣지에서 10초 뒤로 점프하여 즉각적인 버퍼링 확보 (끊김 방지)
-                    let target = audio.seekable.end(0) - 10;
+                    // iOS 네이티브: 라이브 엣지에서 JUMP_MARGIN(30초) 만큼 뒤로 점프하여 넉넉한 버퍼 확보
+                    let target = audio.seekable.end(0) - JUMP_MARGIN;
                     if (target < audio.seekable.start(0)) target = audio.seekable.start(0);
                     audio.currentTime = target;
                 }
