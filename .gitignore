@@ -1,0 +1,4 @@
+.bkit/
+.gemini/
+.DS_Store
+*.log

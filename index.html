@@ -6,24 +6,28 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="MBC 라디오">
-    <meta name="theme-color" content="#000000">
+    <meta name="theme-color" content="#0a0b0e">
     <link rel="apple-touch-icon" href="https://i.ibb.co/hR8Nf8x/mbc-icon.png">
     <link rel="manifest" href="manifest.json">
-    <link rel="preconnect" href="https://mini-sfm.akamaized.net">
-    <link rel="preconnect" href="https://sfm-hls.imbc.com">
-    <link rel="preconnect" href="https://minimw.imbc.com">
-    <title>MBC 표준FM</title>
+    <link rel="preconnect" href="https://minisw.imbc.com">
+    <link rel="preconnect" href="https://sminiplay.imbc.com">
+    <link rel="preconnect" href="https://miniapi.imbc.com">
+    <link rel="preconnect" href="https://img.imbc.com">
+    <title>MBC 표준FM LIVE</title>
     <style>
         :root {
-            --primary: #007aff;
-            --primary-gradient: linear-gradient(135deg, #007aff, #5856d6);
-            --bg: #000000;
-            --card-bg: rgba(28, 28, 30, 0.45);
-            --card-border: rgba(255, 255, 255, 0.12);
-            --text: #ffffff;
-            --text-sub: rgba(255, 255, 255, 0.55);
-            --green: #34c759;
-            --red: #ff3b30;
+            --bg-base: #0c0d10;
+            --surface-panel: rgba(22, 24, 29, 0.72);
+            --surface-border: rgba(255, 255, 255, 0.08);
+            --surface-highlight: rgba(255, 255, 255, 0.04);
+            --text-primary: #f5f6f8;
+            --text-secondary: #8e93a0;
+            --text-tertiary: #565a66;
+            --accent-live: #ff3b30;
+            --accent-active: #ffffff;
+            --accent-safe: #34c759;
+            --accent-charging: #ff9f0a;
+            --radius-main: 32px;
         }
 
         * {
@@ -33,634 +37,1206 @@
             user-select: none;
         }
 
-        body {
-            margin: 0; padding: 0;
-            font-family: -apple-system, "SF Pro Display", "SF Pro Text", "Helvetica Neue", sans-serif;
-            background: var(--bg);
-            background-image:
-                radial-gradient(at 0% 0%, rgba(0, 122, 255, 0.15) 0px, transparent 50%),
-                radial-gradient(at 100% 100%, rgba(88, 86, 214, 0.15) 0px, transparent 50%);
-            color: var(--text);
-            height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: var(--bg-base);
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Pretendard", "Helvetica Neue", sans-serif;
+            color: var(--text-primary);
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* ── 동적 앰비언트 배경 (현재 프로그램 커버 아트 블러) ── */
+        .ambient-glow-wrapper {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100vw; height: 100vh;
+            pointer-events: none;
+            z-index: 0;
             overflow: hidden;
         }
 
-        .container {
+        .ambient-glow {
+            position: absolute;
+            top: -20%; left: -20%;
+            width: 140%; height: 140%;
+            background-size: cover;
+            background-position: center;
+            filter: blur(85px) saturate(140%) brightness(0.28);
+            transform: translateZ(0);
+            transition: opacity 1.2s ease;
+            opacity: 0.65;
+        }
+
+        .ambient-overlay {
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(circle at 50% 35%, transparent 20%, rgba(12, 13, 16, 0.85) 85%);
+        }
+
+        /* ── 메인 컨테이너 ── */
+        .app-viewport {
+            position: relative;
+            z-index: 1;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            align-items: center;
+            padding: calc(env(safe-area-inset-top) + 16px) 24px calc(env(safe-area-inset-bottom) + 20px);
+            max-width: 440px;
+            margin: 0 auto;
+        }
+
+        /* ── 상단 메타 헤더 ── */
+        .top-nav {
+            width: 100%;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 4px 6px;
+        }
+
+        .station-brand {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .brand-badge {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: #ffffff;
+            font-size: 0.68rem;
+            font-weight: 700;
+            letter-spacing: 0.6px;
+            padding: 3px 8px;
+            border-radius: 6px;
+        }
+
+        .station-freq {
+            font-size: 0.78rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            letter-spacing: -0.2px;
+        }
+
+        .live-tag {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.7rem;
+            font-weight: 700;
+            color: var(--accent-live);
+            letter-spacing: 0.8px;
+            background: rgba(255, 59, 48, 0.12);
+            border: 1px solid rgba(255, 59, 48, 0.25);
+            padding: 3px 9px;
+            border-radius: 20px;
+        }
+
+        .live-dot {
+            width: 6px; height: 6px;
+            border-radius: 50%;
+            background-color: var(--accent-live);
+            box-shadow: 0 0 8px rgba(255, 59, 48, 0.8);
+        }
+
+        /* ── 듀얼 시계 인디케이터 (정밀 계측형) ── */
+        .world-clock-bar {
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 16px;
+            font-size: 0.74rem;
+            color: var(--text-tertiary);
+            margin: 8px 0 16px;
+            letter-spacing: 0.3px;
+        }
+
+        .clock-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .clock-label {
+            font-weight: 600;
+            opacity: 0.75;
+            font-size: 0.65rem;
+        }
+
+        .clock-val {
+            color: var(--text-secondary);
+            font-variant-numeric: tabular-nums;
+            font-weight: 600;
+            font-size: 0.78rem;
+        }
+
+        .clock-sep {
+            color: var(--surface-border);
+            font-size: 0.6rem;
+        }
+
+        /* ── 프로그램 앨범 커버 ── */
+        .cover-section {
+            position: relative;
+            width: 230px;
+            height: 230px;
+            margin: 4px auto 16px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .cover-art-box {
+            width: 100%;
+            height: 100%;
+            border-radius: 24px;
+            overflow: hidden;
+            position: relative;
+            background: #191b20;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.04);
+            transition: transform 0.4s cubic-bezier(0.2, 0.9, 0.3, 1), box-shadow 0.4s ease;
+        }
+
+        .app-viewport.is-playing .cover-art-box {
+            transform: scale(1.02);
+            box-shadow: 0 30px 60px -15px rgba(0, 0, 0, 0.85), 0 0 0 1px rgba(255, 255, 255, 0.12);
+        }
+
+        .cover-img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+            transition: opacity 0.5s ease;
+        }
+
+        .cover-placeholder {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            gap: 12px;
+            background: linear-gradient(180deg, #1f2229 0%, #15171c 100%);
+            color: var(--text-tertiary);
+        }
+
+        .cover-placeholder-logo {
+            font-size: 2.2rem;
+            font-weight: 900;
+            letter-spacing: -1px;
+            color: rgba(255, 255, 255, 0.2);
+        }
+
+        /* ── 온에어 프로그램 메타 정보 ── */
+        .program-info {
+            width: 100%;
+            text-align: center;
+            padding: 0 12px;
+            margin-bottom: 14px;
+        }
+
+        .program-title {
+            font-size: 1.35rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            letter-spacing: -0.4px;
+            margin: 0 0 6px;
+            line-height: 1.25;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .program-time-wrap {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 0.78rem;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        .prog-day {
+            background: rgba(255, 255, 255, 0.07);
+            padding: 1px 6px;
+            border-radius: 4px;
+            font-size: 0.68rem;
+            color: var(--text-tertiary);
+        }
+
+        .next-program-preview {
+            margin-top: 6px;
+            font-size: 0.72rem;
+            color: var(--text-tertiary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        /* ── 버퍼 상태 게이지 (슬릭 인디케이터) ── */
+        .buffer-monitor {
+            width: 100%;
+            background: var(--surface-panel);
+            backdrop-filter: blur(25px);
+            -webkit-backdrop-filter: blur(25px);
+            border: 1px solid var(--surface-border);
+            border-radius: 18px;
+            padding: 12px 16px;
+            margin-bottom: 20px;
+        }
+
+        .buffer-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.7rem;
+            margin-bottom: 8px;
+        }
+
+        .buf-title {
+            color: var(--text-tertiary);
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+        }
+
+        .buf-stats {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .buf-sec {
+            font-weight: 700;
+            color: var(--text-primary);
+            font-size: 0.8rem;
+        }
+
+        .buf-pill {
+            font-size: 0.62rem;
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 6px;
+            letter-spacing: 0.3px;
+        }
+
+        .pill-safe { background: rgba(52, 199, 89, 0.15); color: var(--accent-safe); }
+        .pill-charging { background: rgba(255, 159, 10, 0.15); color: var(--accent-charging); }
+        .pill-low { background: rgba(255, 59, 48, 0.15); color: var(--accent-live); }
+
+        .gauge-track {
+            width: 100%;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 2px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .gauge-bar {
+            height: 100%;
+            width: 0%;
+            background: var(--text-primary);
+            border-radius: 2px;
+            transition: width 0.4s ease, background 0.3s;
+        }
+
+        .buffer-meta-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.65rem;
+            color: var(--text-tertiary);
+            margin-top: 8px;
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* ── 오디오 컨트롤 바 ── */
+        .controls-panel {
             width: 100%;
             display: flex;
             flex-direction: column;
             align-items: center;
-            padding: 20px;
+            gap: 16px;
         }
 
-        /* ── 시계 ── */
-        .clocks {
+        .main-controls {
             display: flex;
             justify-content: center;
-            gap: 20px;
-            margin-bottom: 30px;
-            font-size: 0.8rem;
-            color: var(--text-sub);
-            font-weight: 500;
-            letter-spacing: 1px;
-        }
-        .clocks span {
-            color: var(--text);
-            font-variant-numeric: tabular-nums;
-            font-weight: 600;
-        }
-
-        /* ── 카드 ── */
-        .player-card {
-            background: var(--card-bg);
-            backdrop-filter: blur(50px) saturate(180%);
-            -webkit-backdrop-filter: blur(50px) saturate(180%);
+            align-items: center;
+            gap: 28px;
             width: 100%;
-            max-width: 400px;
-            border-radius: 50px;
-            padding: 40px 30px;
-            text-align: center;
-            border: 1.5px solid var(--card-border);
-            box-shadow: 0 50px 100px rgba(0, 0, 0, 0.5);
         }
 
-        .station-logo {
-            width: 90px; height: 90px;
-            background: var(--primary-gradient);
-            border-radius: 22px;
-            margin: 0 auto 25px;
-            display: flex; justify-content: center; align-items: center;
-            font-weight: 900; font-size: 1.6rem; color: white;
-            box-shadow: 0 15px 30px rgba(0, 122, 255, 0.3);
-        }
-
-        h1 { font-size: 2.2rem; margin: 0 0 8px; font-weight: 700; letter-spacing: -1px; }
-
-        .location {
-            font-size: 0.9rem; color: var(--text-sub);
-            margin-bottom: 25px;
-            display: flex; align-items: center; justify-content: center;
-            gap: 8px; font-weight: 500;
-        }
-
-        .pulse {
-            width: 8px; height: 8px;
-            background: var(--green);
+        .icon-btn {
+            background: transparent;
+            border: 1px solid rgba(255, 255, 255, 0.08);
             border-radius: 50%;
-            animation: pulse-anim 2s infinite;
+            width: 44px;
+            height: 44px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: var(--text-secondary);
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
         }
 
-        @keyframes pulse-anim {
-            0%   { opacity: 1; transform: scale(1);   box-shadow: 0 0 0 0   rgba(52,199,89,.4); }
-            70%  { opacity: .5; transform: scale(1.2); box-shadow: 0 0 0 10px rgba(52,199,89,0); }
-            100% { opacity: 1; transform: scale(1);   box-shadow: 0 0 0 0   rgba(52,199,89,0); }
-        }
-
-        /* ── 데이터 정보 ── */
-        .data-info {
-            display: flex; justify-content: center; gap: 15px;
-            margin: 0 auto 35px;
-            background: rgba(255,255,255,.06);
-            padding: 12px 20px; border-radius: 20px; width: fit-content;
-        }
-        .data-item { display: flex; flex-direction: column; align-items: center; gap: 2px; }
-        .data-label { opacity: .5; font-size: .55rem; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; }
-        .data-value { font-weight: 700; font-size: .9rem; }
-
-        /* ── 시각화 바 ── */
-        .visualizer {
-            display: flex; justify-content: center; align-items: center;
-            gap: 5px; height: 40px; margin-bottom: 40px;
-        }
-        .bar {
-            width: 5px; height: 6px;
-            background: var(--text); opacity: .2;
-            border-radius: 3px; transition: all .3s;
-        }
-        .playing .bar {
-            background: var(--primary); opacity: 1;
-            animation: bounce 1.2s infinite ease-in-out;
-        }
-        .bar:nth-child(2) { animation-delay: .15s; }
-        .bar:nth-child(3) { animation-delay: .30s; }
-        .bar:nth-child(4) { animation-delay: .45s; }
-        .bar:nth-child(5) { animation-delay: .60s; }
-        @keyframes bounce {
-            0%, 100% { height: 6px; }
-            50%       { height: 40px; }
-        }
-
-        /* ── 컨트롤 ── */
-        .controls { display: flex; flex-direction: column; align-items: center; gap: 30px; }
-
-        .sub-btn {
-            width: 44px; height: 44px;
+        .icon-btn:active {
+            transform: scale(0.92);
             background: rgba(255, 255, 255, 0.08);
-            border: 1px solid var(--card-border);
-            border-radius: 50%;
-            color: white; font-size: 1.1rem;
-            cursor: pointer; display: flex; align-items: center; justify-content: center;
-            transition: all 0.2s ease;
+            color: var(--text-primary);
         }
-        .sub-btn:active { transform: scale(0.9); background: rgba(255, 255, 255, 0.15); }
 
-        /* ── 플레이 버튼 (3가지 상태) ── */
-        #play-btn {
-            width: 80px; height: 80px;
-            border-radius: 50%; border: none;
+        /* ── 메인 재생 버튼 (솔리드 미니멀 하드웨어 감성) ── */
+        .play-trigger {
+            width: 76px;
+            height: 76px;
+            border-radius: 50%;
+            background: #ffffff;
+            border: none;
+            display: flex;
+            justify-content: center;
+            align-items: center;
             cursor: pointer;
-            display: flex; justify-content: center; align-items: center;
-            transition: background 0.3s ease, box-shadow 0.3s ease, transform 0.15s ease;
-            /* 기본(정지) 상태: 흰색 */
-            background: white;
-            box-shadow: 0 15px 35px rgba(0,0,0,.2);
-        }
-        #play-btn:active { transform: scale(0.92); }
-
-        /* 로딩 상태: 반투명 흰색 + 파동 애니메이션 */
-        #play-btn.state-loading {
-            background: rgba(255,255,255,.2);
-            animation: btn-wave 1.2s ease-in-out infinite;
-        }
-        @keyframes btn-wave {
-            0%, 100% { box-shadow: 0 15px 35px rgba(0,122,255,.1), 0 0 0 0   rgba(0,122,255,.3); }
-            50%       { box-shadow: 0 15px 35px rgba(0,122,255,.3), 0 0 0 18px rgba(0,122,255,0); }
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+            transition: transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1), background-color 0.2s, box-shadow 0.2s;
+            position: relative;
         }
 
-        /* 재생 상태: 파란 그라데이션 */
-        #play-btn.state-playing {
-            background: linear-gradient(135deg, #007aff, #5856d6);
-            box-shadow: 0 15px 35px rgba(0,122,255,.5);
-            animation: none;
+        .play-trigger:active {
+            transform: scale(0.92);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.4);
         }
 
-        /* 버튼 내부 아이콘 */
-        .play-icon {
-            width: 0; height: 0;
-            border-top: 12px solid transparent;
-            border-bottom: 12px solid transparent;
-            border-left: 20px solid black; /* 흰 배경 위 → 검정 */
-            margin-left: 6px;
-            flex-shrink: 0;
+        .play-glyph {
+            width: 0;
+            height: 0;
+            border-top: 10px solid transparent;
+            border-bottom: 10px solid transparent;
+            border-left: 17px solid #000000;
+            margin-left: 4px;
+            transition: opacity 0.2s;
         }
-        .pause-icon {
-            width: 22px; height: 24px;
-            display: none; gap: 6px;
-            flex-shrink: 0;
-        }
-        .pause-icon::before, .pause-icon::after {
-            content: ''; flex: 1;
-            background: white; /* 파란 배경 위 → 흰색 */
-            border-radius: 3px;
-        }
-        .spinner {
+
+        .pause-glyph {
             display: none;
-            width: 22px; height: 22px;
-            border: 3px solid rgba(255,255,255,.25);
-            border-top-color: rgba(255,255,255,.9);
+            width: 18px;
+            height: 20px;
+            gap: 5px;
+        }
+
+        .pause-glyph::before,
+        .pause-glyph::after {
+            content: '';
+            flex: 1;
+            background: #000000;
+            border-radius: 2px;
+        }
+
+        .spinner-ring {
+            display: none;
+            width: 24px;
+            height: 24px;
+            border: 2px solid rgba(0, 0, 0, 0.18);
+            border-top-color: #000000;
             border-radius: 50%;
-            animation: spin .7s linear infinite;
-            flex-shrink: 0;
+            animation: spin-loop 0.7s linear infinite;
         }
-        @keyframes spin { to { transform: rotate(360deg); } }
 
-        /* 상태별 아이콘 표시 제어 */
-        #play-btn.state-loading .play-icon  { display: none; }
-        #play-btn.state-loading .pause-icon { display: none; }
-        #play-btn.state-loading .spinner    { display: block; }
-
-        #play-btn.state-playing .play-icon  { display: none; }
-        #play-btn.state-playing .pause-icon { display: flex; }
-
-        /* ── 볼륨 ── */
-        .volume-container {
-            width: 100%; max-width: 280px;
-            display: flex; align-items: center; gap: 12px;
+        @keyframes spin-loop {
+            to { transform: rotate(360deg); }
         }
-        .volume-icon { font-size: 1.1rem; opacity: .5; }
-        #volume-slider {
-            flex: 1; -webkit-appearance: none;
-            background: rgba(255,255,255,.15);
-            height: 6px; border-radius: 3px; outline: none;
+
+        /* 버튼 상태 */
+        .play-trigger.is-loading .play-glyph { display: none; }
+        .play-trigger.is-loading .pause-glyph { display: none; }
+        .play-trigger.is-loading .spinner-ring { display: block; }
+
+        .play-trigger.is-playing .play-glyph { display: none; }
+        .play-trigger.is-playing .pause-glyph { display: flex; }
+
+        /* ── 볼륨 슬라이더 (정밀 트랙) ── */
+        .volume-bar-wrap {
+            width: 100%;
+            max-width: 260px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
         }
-        #volume-slider::-webkit-slider-thumb {
+
+        .vol-icon {
+            font-size: 0.8rem;
+            color: var(--text-tertiary);
+        }
+
+        .vol-slider {
+            flex: 1;
             -webkit-appearance: none;
-            width: 24px; height: 24px;
-            background: white; border-radius: 50%;
+            height: 3px;
+            background: rgba(255, 255, 255, 0.12);
+            border-radius: 2px;
+            outline: none;
+        }
+
+        .vol-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: #ffffff;
             cursor: pointer;
-            box-shadow: 0 2px 10px rgba(0,0,0,.3);
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
         }
 
-        /* ── 상태 메시지 ── */
-        #msg {
-            margin-top: 30px;
-            font-size: .85rem; font-weight: 500;
-            color: var(--text-sub);
-            min-height: 1.2rem;
-            transition: color .3s;
+        /* ── 상태 피드백 메시지 ── */
+        .status-caption {
+            font-size: 0.74rem;
+            font-weight: 500;
+            color: var(--text-tertiary);
+            min-height: 1rem;
+            text-align: center;
+            transition: color 0.3s;
         }
 
-        /* ── 재시도 버튼 ── */
-        #retry-btn {
-            display: none;
-            margin-top: 15px;
-            background: rgba(255,255,255,.1);
-            border: 1px solid rgba(255,255,255,.2);
-            color: var(--text);
-            padding: 10px 24px;
-            border-radius: 20px;
-            font-size: .8rem; font-weight: 600;
-            cursor: pointer;
-            transition: background .2s;
-        }
-        #retry-btn:active { background: rgba(255,255,255,.2); }
+        .status-caption.safe { color: var(--accent-safe); }
+        .status-caption.warn { color: var(--accent-charging); }
+        .status-caption.error { color: var(--accent-live); }
 
-        /* ── 디버그 ── */
-        #debug {
-            position: absolute; bottom: 20px;
-            font-size: 10px; color: rgba(255,255,255,.2);
-            width: 100%; left: 0; text-align: center; font-weight: 500;
+        /* ── 디버그/버전 푸터 ── */
+        .footer-debug {
+            font-size: 0.65rem;
+            color: rgba(255, 255, 255, 0.2);
+            text-align: center;
+            margin-top: 4px;
+            letter-spacing: 0.3px;
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="clocks">SYD <span id="st">--:--</span> | SEL <span id="kt">--:--</span></div>
-        <div class="player-card">
-            <div class="station-logo">MBC</div>
-            <h1>표준FM</h1>
-            <div class="location"><span class="pulse"></span> AUSTRALIA ⇄ KOREA</div>
-            <div class="data-info">
-                <div class="data-item">
-                    <span class="data-label">RATE</span>
-                    <span class="data-value" id="rate-val">—</span>
-                    <span class="data-label">kbps</span>
-                </div>
-                <div class="data-item">
-                    <span class="data-label">TOTAL</span>
-                    <span class="data-value" id="total-val">0.00</span>
-                    <span class="data-label">MB</span>
-                </div>
-            </div>
-            <div class="visualizer" id="visualizer">
-                <div class="bar"></div>
-                <div class="bar"></div>
-                <div class="bar"></div>
-                <div class="bar"></div>
-                <div class="bar"></div>
-            </div>
-            <div class="controls">
-                <div style="display: flex; align-items: center; gap: 20px;">
-                    <button id="sync-btn" class="sub-btn" title="강제 동기화">🔄</button>
-                    <button id="play-btn">
-                        <div class="play-icon"></div>
-                        <div class="pause-icon"></div>
-                        <div class="spinner"></div>
-                    </button>
-                    <div style="width: 44px;"></div> <!-- 밸런스를 위한 더미 -->
-                </div>
-                <div class="volume-container">
-                    <span class="volume-icon">🔈</span>
-                    <input type="range" id="volume-slider" min="0" max="1" step="0.01" value="1">
-                </div>
-            </div>
-            <div id="msg">재생 버튼을 누르세요</div>
-            <button id="retry-btn">다시 시도</button>
-        </div>
+    <!-- 동적 앰비언트 백드롭 -->
+    <div class="ambient-glow-wrapper">
+        <div class="ambient-glow" id="ambient-glow"></div>
+        <div class="ambient-overlay"></div>
     </div>
-    <div id="debug">System Ready</div>
 
-    <audio id="audio" playsinline webkit-playsinline preload="none"></audio>
+    <div class="app-viewport" id="app-viewport">
+        <!-- 1. 상단 바 -->
+        <header class="top-nav">
+            <div class="station-brand">
+                <span class="brand-badge">MBC</span>
+                <span class="station-freq">표준FM 95.9</span>
+            </div>
+            <div class="live-tag">
+                <span class="live-dot"></span>
+                <span>ON AIR</span>
+            </div>
+        </header>
 
-    <!--
-        HLS.js: 비-iOS 브라우저(Chrome, Firefox, Edge 등)에서 HLS 스트림 제어.
-        iOS Safari는 네이티브 HLS를 사용하며 HLS.js가 지원되지 않으므로 자동으로 fallback됨.
-    -->
+        <!-- 2. 시계 인디케이터 (시드니 / 서울) -->
+        <div class="world-clock-bar">
+            <div class="clock-item">
+                <span class="clock-label">SYDNEY</span>
+                <span class="clock-val" id="syd-time">--:--</span>
+            </div>
+            <span class="clock-sep">·</span>
+            <div class="clock-item">
+                <span class="clock-label">SEOUL</span>
+                <span class="clock-val" id="sel-time">--:--</span>
+            </div>
+        </div>
+
+        <!-- 3. 현재 프로그램 앨범 커버 아트 -->
+        <section class="cover-section">
+            <div class="cover-art-box">
+                <div class="cover-placeholder" id="cover-placeholder">
+                    <span class="cover-placeholder-logo">MBC</span>
+                    <span style="font-size:0.75rem; letter-spacing:0.5px;">스마트라디오 mini</span>
+                </div>
+                <img id="program-cover" class="cover-img" style="display:none;" alt="프로그램 앨범 아트">
+            </div>
+        </section>
+
+        <!-- 4. 실시간 프로그램 타이틀 & 편성 정보 -->
+        <div class="program-info">
+            <h1 class="program-title" id="program-title">MBC 표준FM 라이브</h1>
+            <div class="program-time-wrap">
+                <span class="prog-day" id="prog-day">LIVE</span>
+                <span id="prog-time">편성표 동기화 중...</span>
+            </div>
+            <div class="next-program-preview" id="next-prog">다음 방송 준비 중</div>
+        </div>
+
+        <!-- 5. 버퍼 모니터 게이지 바 -->
+        <div class="buffer-monitor">
+            <div class="buffer-header">
+                <span class="buf-title">BUFFER RESERVE</span>
+                <div class="buf-stats">
+                    <span class="buf-sec" id="buf-text">0s</span>
+                    <span class="buf-pill pill-low" id="buf-pill">대기</span>
+                </div>
+            </div>
+            <div class="gauge-track">
+                <div class="gauge-bar" id="gauge-bar"></div>
+            </div>
+            <div class="buffer-meta-row">
+                <span id="meta-rate">STREAM: 128 kbps</span>
+                <span id="meta-total">DATA: 0.0 MB</span>
+            </div>
+        </div>
+
+        <!-- 6. 메인 컨트롤 -->
+        <div class="controls-panel">
+            <div class="main-controls">
+                <button class="icon-btn" id="sync-btn" title="스트림 및 편성표 완전 새로고침">🔄</button>
+                
+                <button class="play-trigger" id="play-btn" title="재생 / 일시정지">
+                    <div class="play-glyph"></div>
+                    <div class="pause-glyph"></div>
+                    <div class="spinner-ring"></div>
+                </button>
+
+                <button class="icon-btn" id="reload-schedule-btn" title="편성표 다시 불러오기">📻</button>
+            </div>
+
+            <div class="volume-bar-wrap">
+                <span class="vol-icon">🔈</span>
+                <input type="range" class="vol-slider" id="vol-slider" min="0" max="1" step="0.01" value="1">
+                <span class="vol-icon">🔊</span>
+            </div>
+
+            <div class="status-caption" id="status-caption">재생 버튼을 탭하여 청취하세요</div>
+        </div>
+
+        <div class="footer-debug" id="debug-text">60s Ultra Delay Buffer · Australia Edition</div>
+    </div>
+
+    <!-- 백그라운드 오디오 엘리먼트 -->
+    <audio id="audio" playsinline webkit-playsinline preload="auto"></audio>
+
+    <!-- HLS.js 라이브러리 -->
     <script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.13/dist/hls.min.js"></script>
+
     <script>
     document.addEventListener('DOMContentLoaded', () => {
-        const audio      = document.getElementById('audio');
-        const playBtn    = document.getElementById('play-btn');
-        const volSlider  = document.getElementById('volume-slider');
-        const msg        = document.getElementById('msg');
-        const visualizer = document.getElementById('visualizer');
-        const debug      = document.getElementById('debug');
-        const rateVal    = document.getElementById('rate-val');
-        const totalVal   = document.getElementById('total-val');
-        const retryBtn   = document.getElementById('retry-btn');
-        const syncBtn    = document.getElementById('sync-btn');
-        const stEl       = document.getElementById('st');
-        const ktEl       = document.getElementById('kt');
+        // DOM 엘리먼트 참조
+        const audio             = document.getElementById('audio');
+        const playBtn           = document.getElementById('play-btn');
+        const syncBtn           = document.getElementById('sync-btn');
+        const reloadScheduleBtn = document.getElementById('reload-schedule-btn');
+        const volSlider         = document.getElementById('vol-slider');
+        const statusCaption     = document.getElementById('status-caption');
+        const debugText         = document.getElementById('debug-text');
+        const appViewport       = document.getElementById('app-viewport');
 
-        // ── 스트리밍 소스 ────────────────────────────────────────
-        //
-        // ★ 호주(시드니)에서 실측 테스트 결과 (2026-04-02, TPG Telecom):
-        //
-        //   [PRIMARY]  5ddfd163bd00d.streamlock.net  → 200 OK, 10/10 성공
-        //              TTFB ~2초, 다운로드 ~75 KB/s (128kbps 재생에 충분)
-        //              울산 MBC STDFM (표준FM 동일 콘텐츠) - 해외 접속 가능
-        //
-        //   [DEAD - 해외 차단됨]
-        //   mini-sfm.akamaized.net   → DNS 없음 (도메인 폐기)
-        //   sfm-hls.imbc.com         → DNS 없음 (한국 IP 전용)
-        //   minimw.imbc.com          → HTTP 400  (해외 IP 차단)
-        //   stream.bsmbc.com         → TCP 불가  (포트 차단)
-        //   live.dgmbc.com           → DNS 없음  (한국 IP 전용)
-        //
-        // ────────────────────────────────────────────────────────
+        const sydTimeEl         = document.getElementById('syd-time');
+        const selTimeEl         = document.getElementById('sel-time');
 
-        const SOURCES = [
-            // 1순위: 호주에서 유일하게 작동하는 서버 (Wowza/Streamlock, 해외 개방)
+        const programTitleEl    = document.getElementById('program-title');
+        const progDayEl         = document.getElementById('prog-day');
+        const progTimeEl        = document.getElementById('prog-time');
+        const nextProgEl        = document.getElementById('next-prog');
+        const programCoverEl    = document.getElementById('program-cover');
+        const coverPlaceholderEl= document.getElementById('cover-placeholder');
+        const ambientGlowEl     = document.getElementById('ambient-glow');
+
+        const bufTextEl         = document.getElementById('buf-text');
+        const bufPillEl         = document.getElementById('buf-pill');
+        const gaugeBarEl        = document.getElementById('gauge-bar');
+        const metaRateEl        = document.getElementById('meta-rate');
+        const metaTotalEl       = document.getElementById('meta-total');
+
+        // 상태 변수
+        let hls                 = null;
+        let userWantsPlay       = false;
+        let isLivePlaying       = false;
+        let schedulesCache      = null;
+        let currentProgramMeta  = null;
+        let lastSeoulCheckMin   = -1;
+
+        // 버퍼링 및 통계
+        const TARGET_DELAY_SEC  = 60; // 60초 지연 지점 재생으로 전방 버퍼 확보
+        let totalDataBytes      = 0;
+        let lastTickTime        = 0;
+        let lastAudioPosition   = -1;
+        let stallCounter        = 0;
+        let initialBufferSeek   = false;
+
+        // 예비 스트림 풀
+        const BACKUP_STREAMS = [
             'https://5ddfd163bd00d.streamlock.net/STDFM/STDFM/playlist.m3u8',
-
-            // 2~6순위: 한국 내 접속 또는 향후 복구 대비 (현재 호주에서 불가)
-            'https://sfm-hls.imbc.com/sfm/sfm.stream/playlist.m3u8',
-            'https://minimw.imbc.com/dsfm/_definst_/sfm.stream/playlist.m3u8',
-            'https://mini-sfm.akamaized.net/sfm/sfm/playlist.m3u8',
-            'https://stream.bsmbc.com/live/mp4:BusanMBC-LiveStream-AM/playlist.m3u8',
-            'https://live.dgmbc.com/dgfm/dgfm.stream/playlist.m3u8',
+            'https://stream.bsmbc.com/live/mp4:BusanMBC-LiveStream-AM/playlist.m3u8'
         ];
+        let backupStreamIndex = 0;
 
-        // 1순위 서버는 연결 실패 시 바로 전환하지 않고 N회 재시도 (안정적이므로)
-        const PRIMARY_MAX_RETRY = 3;
-        const AUTO_RETRY_DELAY  = 20000; // 모든 소스 실패 후 자동 재시도 간격 (ms)
-        const BUFFER_TIMEOUT    = 10000; // 버퍼링 대기 한계
-        const STALL_JUMP_SEC    =     3; // N초 멈춤 → 안전 마진 점프
-        const STALL_RELOAD_SEC  =     8; // N초 멈춤 → 강제 재로드
-        const STALL_SWITCH_SEC  =    15; // N초 멈춤 → 다음 소스 전환
-        const JUMP_MARGIN       =    60; // 라이브 엣지로부터 60초 뒤에서 재생 (안정성 극대화)
-        const MIN_START_BUFFER  =    15; // 재생 시작 전 최소 15초 버퍼 확보 강제
-
-        let hls             = null;
-        let srcIdx          = 0;
-        let primaryRetry    = 0;     // 1순위 서버 재시도 횟수
-        let userWantsPlay   = false; // 사용자 의도: true면 재연결 로직 활성화
-        let isLive          = false; // 실제 오디오 재생 여부
-        let totalBytes      = 0;
-        let lastMs          = 0;
-        let lastAudioTime   = -1;
-        let stallCount      = 0;
-        let bufferTimer     = null;
-        let autoRetryTimer  = null;
-
-        // ── 시계 ─────────────────────────────────────────────
-        function tick() {
+        // ──────────────────────────────────────────────────────────
+        // 1. 실시간 듀얼 시계 & 편성표 자동 감시
+        // ──────────────────────────────────────────────────────────
+        function updateClocks() {
             const now = new Date();
-            const opt = { hour: '2-digit', minute: '2-digit', hour12: false };
-            stEl.innerText = now.toLocaleTimeString('en-AU', { ...opt, timeZone: 'Australia/Sydney' });
-            ktEl.innerText = now.toLocaleTimeString('ko-KR', { ...opt, timeZone: 'Asia/Seoul' });
-        }
-        setInterval(tick, 1000);
-        tick();
+            const timeOpt = { hour: '2-digit', minute: '2-digit', hour12: false };
+            sydTimeEl.innerText = now.toLocaleTimeString('en-AU', { ...timeOpt, timeZone: 'Australia/Sydney' });
+            selTimeEl.innerText = now.toLocaleTimeString('ko-KR', { ...timeOpt, timeZone: 'Asia/Seoul' });
 
-        // ── 데이터 사용량 & 스톨 감지 (1초 간격) ────────────
-        setInterval(() => {
-            if (!isLive) {
-                lastMs = 0;
-                stallCount = 0;
-                return;
-            }
-
-            // 데이터 사용량 추정 (128kbps 고정)
-            const now = Date.now();
-            if (lastMs > 0) {
-                const dt = (now - lastMs) / 1000;
-                totalBytes += (128 * 1024 / 8) * dt;
-                rateVal.innerText = '128';
-                totalVal.innerText = (totalBytes / (1024 * 1024)).toFixed(2);
-            }
-            lastMs = now;
-
-            // 스톨 감지: currentTime이 멈추면 카운트
-            if (audio.currentTime === lastAudioTime) {
-                stallCount++;
-                if (stallCount === STALL_JUMP_SEC) {
-                    debug.innerText = `Stall ×${STALL_JUMP_SEC} — buffering (jump -30s)...`;
-                    jumpToLive();
-                } else if (stallCount === STALL_RELOAD_SEC) {
-                    debug.innerText = `Stall ×${STALL_RELOAD_SEC} — force reload...`;
-                    loadSource(srcIdx); // 7초 멈춤 시 세션 강제 초기화 (소리 반복 방지)
-                } else if (stallCount >= STALL_SWITCH_SEC) {
-                    debug.innerText = `Stall ×${STALL_SWITCH_SEC} — switching source...`;
-                    stallCount = 0;
-                    tryNext();
+            // 1분마다 KST 시각을 감시하여 프로그램 교체 시간인지 확인
+            const seoulDate = getSeoulDate();
+            const curMin = seoulDate.getMinutes();
+            if (curMin !== lastSeoulCheckMin) {
+                lastSeoulCheckMin = curMin;
+                if (schedulesCache) {
+                    evaluateCurrentProgram(schedulesCache);
+                } else {
+                    fetchLiveSchedules();
                 }
+            }
+        }
+        setInterval(updateClocks, 1000);
+        updateClocks();
+
+        function getSeoulDate() {
+            const now = new Date();
+            const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
+            return new Date(utc + (9 * 3600000)); // KST UTC+9
+        }
+
+        // ──────────────────────────────────────────────────────────
+        // 2. 공식 MBC 실시간 편성표 연동 (JSONP 기법)
+        // ──────────────────────────────────────────────────────────
+        function fetchLiveSchedules() {
+            return new Promise((resolve, reject) => {
+                const cbName = 'mbc_sched_cb_' + Date.now();
+                const script = document.createElement('script');
+                let handled = false;
+
+                const timer = setTimeout(() => {
+                    cleanup();
+                    if (!handled) {
+                        handled = true;
+                        reject(new Error('편성표 타임아웃'));
+                    }
+                }, 7000);
+
+                function cleanup() {
+                    clearTimeout(timer);
+                    try { delete window[cbName]; } catch (e) { window[cbName] = undefined; }
+                    if (script.parentNode) script.parentNode.removeChild(script);
+                }
+
+                window[cbName] = function(data) {
+                    cleanup();
+                    if (handled) return;
+                    handled = true;
+                    if (Array.isArray(data) && data.length > 0) {
+                        schedulesCache = data;
+                        evaluateCurrentProgram(data);
+                        resolve(data);
+                    } else {
+                        reject(new Error('편성 데이터 없음'));
+                    }
+                };
+
+                script.onerror = function() {
+                    cleanup();
+                    if (!handled) {
+                        handled = true;
+                        reject(new Error('편성표 로드 실패'));
+                    }
+                };
+
+                script.src = `https://miniapi.imbc.com/Schedule/schedulelist?channel=sfm&callback=${cbName}&_t=${Date.now()}`;
+                document.head.appendChild(script);
+            });
+        }
+
+        // KST 기준 현재 방송 프로그램 판별
+        function evaluateCurrentProgram(schedules) {
+            if (!schedules || schedules.length === 0) return;
+
+            const seoul = getSeoulDate();
+            const daysMap = ['일', '월', '화', '수', '목', '금', '토'];
+            const curDay = daysMap[seoul.getDay()];
+            const curHHMM = String(seoul.getHours()).padStart(2, '0') + String(seoul.getMinutes()).padStart(2, '0');
+            const curVal = parseInt(curHHMM, 10);
+
+            // MBC 표준FM(STFM) & 오늘 요일 필터
+            const todaySTFM = schedules.filter(p => p.Channel === 'STFM' && p.LiveDays === curDay);
+            todaySTFM.sort((a, b) => parseInt(a.StartTime, 10) - parseInt(b.StartTime, 10));
+
+            let current = null;
+            let next = null;
+
+            for (let i = 0; i < todaySTFM.length; i++) {
+                const p = todaySTFM[i];
+                const st = parseInt(p.StartTime, 10);
+                let et = parseInt(p.EndTime, 10);
+                if (et === 0) et = 2400; // 자정 종료
+
+                if (st <= curVal && curVal < et) {
+                    current = p;
+                    next = todaySTFM[(i + 1) % todaySTFM.length];
+                    break;
+                }
+            }
+
+            if (current) {
+                applyProgramMetadata(current, next, curDay);
+            }
+        }
+
+        // UI 및 MediaSession에 프로그램 정보 적용
+        function applyProgramMetadata(cur, next, dayLabel) {
+            currentProgramMeta = cur;
+            programTitleEl.innerText = cur.ProgramTitle || 'MBC 표준FM';
+
+            // 시간 포맷 (0900 -> 09:00)
+            const fmtTime = (t) => {
+                if (!t || t.length < 4) return t;
+                return `${t.slice(0, 2)}:${t.slice(2, 4)}`;
+            };
+
+            progDayEl.innerText = `${dayLabel}요일`;
+            progTimeEl.innerText = `${fmtTime(cur.StartTime)} - ${fmtTime(cur.EndTime)}`;
+
+            if (next) {
+                nextProgEl.innerText = `다음 방송: ${next.ProgramTitle} (${fmtTime(next.StartTime)})`;
             } else {
-                stallCount = 0;
+                nextProgEl.innerText = 'MBC 라디오 95.9 MHz';
             }
-            lastAudioTime = audio.currentTime;
-        }, 1000);
 
-        // ── 수동 동기화 ──────────────────────────────────────
-        syncBtn.onclick = () => {
-            if (userWantsPlay) {
-                debug.innerText = 'Manual force reload triggered...';
-                loadSource(srcIdx);
+            // 고화질 앨범 커버 반영
+            const coverUrl = cur.NewHDPicture || cur.HDPicture || cur.Picture || cur.ThumbnailPicture;
+            if (coverUrl) {
+                const secureCover = coverUrl.replace('http://', 'https://');
+                programCoverEl.src = secureCover;
+                programCoverEl.onload = () => {
+                    programCoverEl.style.display = 'block';
+                    coverPlaceholderEl.style.display = 'none';
+                    ambientGlowEl.style.backgroundImage = `url('${secureCover}')`;
+                };
             }
-        };
 
-        // ── HLS 초기화 ────────────────────────────────────────
-        function destroyHls() {
-            clearTimeout(bufferTimer);
-            clearTimeout(autoRetryTimer);
-            bufferTimer = autoRetryTimer = null;
+            // iOS 잠금화면 & 에어팟 메타데이터 동기화
+            updateMediaSessionMetadata(cur.ProgramTitle, coverUrl);
+        }
 
+        // ──────────────────────────────────────────────────────────
+        // 3. iOS MediaSession API (백그라운드 & 잠금화면 완전 연동)
+        // ──────────────────────────────────────────────────────────
+        function updateMediaSessionMetadata(title, coverUrl) {
+            if (!('mediaSession' in navigator)) return;
+
+            const artworks = [];
+            if (coverUrl) {
+                artworks.push({ src: coverUrl.replace('http://', 'https://'), sizes: '512x512', type: 'image/jpeg' });
+            }
+            artworks.push({ src: 'https://i.ibb.co/hR8Nf8x/mbc-icon.png', sizes: '512x512', type: 'image/png' });
+
+            navigator.mediaSession.metadata = new MediaMetadata({
+                title: title || 'MBC 표준FM (95.9MHz)',
+                artist: 'MBC 스마트라디오 mini',
+                album: '호주 LIVE (버퍼 세이프)',
+                artwork: artworks
+            });
+
+            navigator.mediaSession.setActionHandler('play', () => startPlayback(false));
+            navigator.mediaSession.setActionHandler('pause', () => pausePlayback());
+            navigator.mediaSession.setActionHandler('stop', () => pausePlayback());
+        }
+
+        // ──────────────────────────────────────────────────────────
+        // 4. 공식 실시간 스트림 URL 발급 (JSONP 기법)
+        // ──────────────────────────────────────────────────────────
+        function requestOfficialStreamUrl() {
+            return new Promise((resolve, reject) => {
+                const cb = 'mbc_stream_cb_' + Date.now();
+                const script = document.createElement('script');
+                let done = false;
+
+                const timer = setTimeout(() => {
+                    cleanup();
+                    if (!done) {
+                        done = true;
+                        reject(new Error('스트림 API 시간 초과'));
+                    }
+                }, 6000);
+
+                function cleanup() {
+                    clearTimeout(timer);
+                    try { delete window[cb]; } catch (e) { window[cb] = undefined; }
+                    if (script.parentNode) script.parentNode.removeChild(script);
+                }
+
+                window[cb] = function(data) {
+                    cleanup();
+                    if (done) return;
+                    done = true;
+                    if (data && data.AACLiveURL) {
+                        resolve(data.AACLiveURL);
+                    } else {
+                        reject(new Error('유효하지 않은 스트림 응답'));
+                    }
+                };
+
+                script.onerror = function() {
+                    cleanup();
+                    if (!done) {
+                        done = true;
+                        reject(new Error('스트림 스크립트 에러'));
+                    }
+                };
+
+                script.src = `https://sminiplay.imbc.com/aacplay.ashx?agent=webapp&channel=sfm&callback=${cb}&_t=${Date.now()}`;
+                document.head.appendChild(script);
+            });
+        }
+
+        // ──────────────────────────────────────────────────────────
+        // 5. 버퍼 초수 계산 & 게이지 갱신
+        // ──────────────────────────────────────────────────────────
+        function getBufferSeconds() {
+            if (!audio || !audio.buffered || audio.buffered.length === 0) return 0;
+            const cur = audio.currentTime;
+            for (let i = 0; i < audio.buffered.length; i++) {
+                const s = audio.buffered.start(i);
+                const e = audio.buffered.end(i);
+                if (cur >= s - 0.5 && cur <= e + 0.5) {
+                    return Math.max(0, e - cur);
+                }
+            }
+            const lastEnd = audio.buffered.end(audio.buffered.length - 1);
+            if (lastEnd > cur) return Math.max(0, lastEnd - cur);
+            return 0;
+        }
+
+        function updateBufferGauge() {
+            const sec = Math.round(getBufferSeconds());
+            bufTextEl.innerText = `${sec}s`;
+
+            // 최대 90초 기준 게이지 바 비율 (0~100%)
+            const pct = Math.min(100, Math.round((sec / 90) * 100));
+            gaugeBarEl.style.width = `${pct}%`;
+
+            bufPillEl.className = 'buf-pill';
+            if (sec >= 20) {
+                bufPillEl.classList.add('pill-safe');
+                bufPillEl.innerText = '안전 확보';
+                gaugeBarEl.style.background = 'var(--accent-safe)';
+            } else if (sec >= 6) {
+                bufPillEl.classList.add('pill-charging');
+                bufPillEl.innerText = '사전 충전';
+                gaugeBarEl.style.background = 'var(--accent-charging)';
+            } else {
+                bufPillEl.classList.add('pill-low');
+                bufPillEl.innerText = isLivePlaying ? '버퍼 부족' : '대기';
+                gaugeBarEl.style.background = 'var(--accent-live)';
+            }
+        }
+
+        // ──────────────────────────────────────────────────────────
+        // 6. 스트림 연결 및 초특급 지연 버퍼링 로직
+        // ──────────────────────────────────────────────────────────
+        function cleanAudioResources() {
             if (hls) {
-                hls.destroy();
+                try { hls.destroy(); } catch (e) {}
                 hls = null;
             }
+            audio.pause();
             audio.removeAttribute('src');
             audio.load();
-            isLive = false;
+            isLivePlaying = false;
+            initialBufferSeek = false;
+            stallCounter = 0;
+            lastAudioPosition = -1;
+            setButtonState('idle');
+            appViewport.classList.remove('is-playing');
+            if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
         }
 
-        function loadSource(idx) {
-            destroyHls();
+        async function initStream(forceRefresh = false) {
+            cleanAudioResources();
             if (!userWantsPlay) return;
 
-            retryBtn.style.display = 'none';
-            const url = SOURCES[idx];
-            setUI('loading', `연결 중... (${idx + 1}/${SOURCES.length})`);
-            debug.innerText = `Connecting: ${new URL(url).hostname}`;
+            setButtonState('loading');
+            setStatus('공식 보안 스트림 토큰 발급 중...', 'warn');
+            debugText.innerText = 'Fetching MBC token...';
 
+            let targetStreamUrl = null;
+            try {
+                targetStreamUrl = await requestOfficialStreamUrl();
+                debugText.innerText = 'Official token ready!';
+            } catch (err) {
+                debugText.innerText = `Using backup stream #${backupStreamIndex + 1}`;
+                targetStreamUrl = BACKUP_STREAMS[backupStreamIndex % BACKUP_STREAMS.length];
+            }
+
+            setStatus('대용량 버퍼 충전 및 연결 중...', 'warn');
+
+            // HLS.js 지원 환경
             if (typeof Hls !== 'undefined' && Hls.isSupported()) {
-                // ─ HLS.js 경로 (Chrome, Firefox, Edge 등) ─
-                hls = new Hls({
-                    // ★ v1.4.0 울트라 버퍼링: 극단적 대기 모드
-                    liveSyncDurationCount:       10,  // 10세그먼트(약 60초) 뒤에서 재생 시작
-                    liveMaxLatencyDurationCount: 15,
-                    maxBufferLength:            180,  // 3분 동안 끊겨도 재생 가능하게 버퍼 확보
-                    maxMaxBufferLength:         600,  // 최대 10분까지 버퍼링 허용
-                    backBufferLength:            10,  // 지나간 데이터는 빠르게 삭제 (메모리 보호)
-                    manifestLoadingTimeOut:   20000,
-                    levelLoadingTimeOut:      20000,
-                    fragLoadingTimeOut:       20000,
-                    fragLoadingMaxRetry:         10,
-                    startFragPrefetch:         true,
-                });
-
-                hls.loadSource(url);
-                hls.attachMedia(audio);
-
-                hls.on(Hls.Events.MANIFEST_PARSED, () => {
-                    // 바로 재생하지 않고 버퍼가 쌓일 때까지 3초만 더 기다림
-                    setTimeout(() => { if (userWantsPlay) audio.play().catch(() => tryNext()); }, 3000);
-                });
-
-                hls.on(Hls.Events.ERROR, (_, data) => {
-                    if (!userWantsPlay || !data.fatal) return;
-                    debug.innerText = `HLS [${data.type}] ${data.details}`;
-                    if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
-                        hls.recoverMediaError(); // 미디어 에러는 복구 시도
-                    } else {
-                        tryNext();               // 네트워크/기타 치명 에러 → 다음 소스
-                    }
-                });
-
+                startHlsEngine(targetStreamUrl);
             } else if (audio.canPlayType('application/vnd.apple.mpegurl')) {
-                // ─ iOS Safari 네이티브 HLS 경로 ─
-                audio.src = url;
-                audio.load();
-                audio.play().catch(() => tryNext());
-
+                // iOS Safari 네이티브 HLS 환경
+                startNativeHlsEngine(targetStreamUrl);
             } else {
-                setUI('error', 'HLS를 지원하지 않는 브라우저입니다.');
+                setStatus('HLS 재생을 지원하지 않는 브라우저입니다.', 'error');
             }
         }
 
-        // ── 다음 소스 시도 ────────────────────────────────────
-        function tryNext() {
-            if (!userWantsPlay) return;
-            isLive = false;
+        function startHlsEngine(streamUrl) {
+            hls = new Hls({
+                // 실시간보다 60초 과거 지점에서 재생 (충분한 선행 버퍼 확보)
+                liveSyncDurationCount:       18,
+                liveMaxLatencyDurationCount: 30,
+                maxBufferLength:            180,  // 전방 3분(180초) 데이터 사전 다운로드
+                maxMaxBufferLength:         420,  // 최대 7분
+                backBufferLength:            20,  // 지나간 버퍼 메모리 해제
+                maxBufferSize:       50 * 1024 * 1024,
+                startFragPrefetch:          true,
+                lowLatencyMode:            false,
+                manifestLoadingTimeOut:    15000,
+                fragLoadingTimeOut:        15000,
+                fragLoadingMaxRetry:          10
+            });
 
-            // 1순위 서버(srcIdx===0)는 안정적이므로 바로 전환하지 않고 재시도
-            if (srcIdx === 0 && primaryRetry < PRIMARY_MAX_RETRY) {
-                primaryRetry++;
-                debug.innerText = `Primary retry ${primaryRetry}/${PRIMARY_MAX_RETRY}...`;
-                setTimeout(() => loadSource(0), 1500);
-                return;
-            }
+            hls.loadSource(streamUrl);
+            hls.attachMedia(audio);
 
-            primaryRetry = 0;
-            srcIdx++;
-            if (srcIdx < SOURCES.length) {
-                setTimeout(() => loadSource(srcIdx), 400);
-            } else {
-                // 모든 소스 실패 → 자동 재시도
-                srcIdx = 0;
-                setUI('error', '연결 실패 — 잠시 후 재시도합니다');
-                retryBtn.style.display = 'inline-block';
-                autoRetryTimer = setTimeout(() => {
-                    if (userWantsPlay) { primaryRetry = 0; loadSource(0); }
-                }, AUTO_RETRY_DELAY);
-            }
+            hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                debugText.innerText = 'Manifest ready. Buffer priming...';
+                setTimeout(() => {
+                    if (userWantsPlay) audio.play().catch(() => {});
+                }, 800);
+            });
+
+            hls.on(Hls.Events.ERROR, (_, data) => {
+                if (!userWantsPlay || !data.fatal) return;
+                debugText.innerText = `HLS error: ${data.details}`;
+                if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+                    hls.recoverMediaError();
+                } else if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+                    setTimeout(() => { if (userWantsPlay) initStream(true); }, 2000);
+                } else {
+                    switchBackupSource();
+                }
+            });
         }
 
-        // ── 라이브 엣지 점프 ──────────────────────────────────
-        function jumpToLive() {
+        function startNativeHlsEngine(streamUrl) {
+            audio.src = streamUrl;
+            audio.load();
+
+            // iOS Safari: 메타데이터 로드 시 60초 뒤로 점프하여 백그라운드 사전 다운로드 강제
+            const applySafeOffset = () => {
+                if (initialBufferSeek) return;
+                try {
+                    if (audio.seekable && audio.seekable.length > 0) {
+                        const end = audio.seekable.end(0);
+                        const start = audio.seekable.start(0);
+                        const target = Math.max(start, end - TARGET_DELAY_SEC);
+                        if (end - start > 15 && target < end - 10) {
+                            audio.currentTime = target;
+                            initialBufferSeek = true;
+                            debugText.innerText = `iOS 60s Buffer Primed (-${Math.round(end - target)}s)`;
+                        }
+                    }
+                } catch (e) {}
+            };
+
+            audio.addEventListener('loadedmetadata', applySafeOffset, { once: true });
+            audio.addEventListener('canplay', applySafeOffset, { once: true });
+
+            audio.play().then(() => {
+                setTimeout(applySafeOffset, 1200);
+            }).catch(() => {});
+        }
+
+        function switchBackupSource() {
+            backupStreamIndex++;
+            setStatus('예비 서버로 전환 중...', 'warn');
+            setTimeout(() => {
+                if (userWantsPlay) initStream(true);
+            }, 1000);
+        }
+
+        function jumpToSafeMargin() {
             try {
                 if (hls && hls.liveSyncPosition && isFinite(hls.liveSyncPosition)) {
-                    // HLS.js: 설정된 지연 시간만큼 뒤로 점프 (약 60초)
                     audio.currentTime = hls.liveSyncPosition;
                 } else if (audio.seekable && audio.seekable.length > 0) {
-                    // iOS 네이티브: 라이브 엣지에서 JUMP_MARGIN(60초) 만큼 뒤로 점프하여 넉넉한 버퍼 확보
-                    let target = audio.seekable.end(0) - JUMP_MARGIN;
-                    if (target < audio.seekable.start(0)) target = audio.seekable.start(0);
-                    audio.currentTime = target;
+                    const end = audio.seekable.end(0);
+                    const start = audio.seekable.start(0);
+                    audio.currentTime = Math.max(start, end - TARGET_DELAY_SEC);
                 }
-                // 재생 시도 전 2초간 더 대기하여 버퍼를 조금이라도 더 채움
-                setTimeout(() => { if (userWantsPlay) audio.play().catch(() => tryNext()); }, 2000);
+                audio.play().catch(() => {});
             } catch (e) {
-                tryNext();
+                initStream(true);
             }
         }
 
-        // ── UI 상태 관리 ──────────────────────────────────────
-        // state: 'idle' | 'loading' | 'playing' | 'error'
-        function setUI(state, text) {
-            playBtn.classList.remove('state-loading', 'state-playing');
-
-            if (state === 'loading') playBtn.classList.add('state-loading');
-            if (state === 'playing') playBtn.classList.add('state-playing');
-
-            visualizer.classList.toggle('playing', state === 'playing');
-
-            if (text !== undefined) msg.innerText = text;
-            msg.style.color = state === 'playing' ? 'var(--green)'
-                            : state === 'error'   ? 'var(--red)'
-                            : 'var(--text-sub)';
-        }
-
-        // ── 이벤트: 플레이 버튼 ──────────────────────────────
-        playBtn.onclick = () => {
-            if (userWantsPlay) {
-                // 재생 중 → 정지
-                userWantsPlay = false;
-                destroyHls();
-                setUI('idle', '일시 정지됨');
-                rateVal.innerText = '—';
-                retryBtn.style.display = 'none';
+        // ──────────────────────────────────────────────────────────
+        // 7. 재생 제어 및 원클릭 즉각 복구 (핵심 사용자 요청)
+        // ──────────────────────────────────────────────────────────
+        function startPlayback(force = false) {
+            userWantsPlay = true;
+            if (force || audio.paused || !isLivePlaying) {
+                initStream(force);
             } else {
-                // 정지 중 → 재생
-                userWantsPlay = true;
-                srcIdx = 0;
-                primaryRetry = 0;
-                loadSource(0);
+                audio.play().catch(() => initStream(true));
+            }
+        }
+
+        function pausePlayback() {
+            userWantsPlay = false;
+            cleanAudioResources();
+            setStatus('일시 정지됨', 'idle');
+            updateBufferGauge();
+        }
+
+        // 플레이 버튼 클릭 시: 끊겼거나 멈췄으면 즉시 재연결 & 재생!
+        playBtn.onclick = () => {
+            const isCurrentlyPlaying = !audio.paused && !audio.ended && isLivePlaying;
+            if (isCurrentlyPlaying) {
+                pausePlayback();
+            } else {
+                // 끊겼거나 버퍼링 중이면 즉시 새 스트림을 열어 강제 재생
+                startPlayback(true);
             }
         };
 
-        retryBtn.onclick = () => {
-            retryBtn.style.display = 'none';
-            srcIdx = 0;
-            loadSource(0);
+        syncBtn.onclick = () => {
+            setStatus('스트림 & 편성표 완전 동기화...', 'warn');
+            fetchLiveSchedules().catch(() => {});
+            userWantsPlay = true;
+            initStream(true);
         };
 
-        volSlider.oninput = e => { audio.volume = e.target.value; };
+        reloadScheduleBtn.onclick = () => {
+            setStatus('편성표 업데이트 중...', 'warn');
+            fetchLiveSchedules().then(() => {
+                setStatus('최신 편성표 동기화 완료', 'safe');
+            }).catch(() => {
+                setStatus('편성표 수신 실패 (네트워크 확인)', 'error');
+            });
+        };
 
-        // ── Audio 이벤트 ─────────────────────────────────────
+        volSlider.oninput = (e) => {
+            audio.volume = e.target.value;
+        };
+
+        // ──────────────────────────────────────────────────────────
+        // 8. 오디오 이벤트 & 상태 처리
+        // ──────────────────────────────────────────────────────────
         audio.onplaying = () => {
             if (!userWantsPlay) return;
-            clearTimeout(bufferTimer);
-            isLive = true;
-            stallCount = 0;
-            setUI('playing', '● 실시간 방송 중');
-            debug.innerText = `Live ✓ ${SOURCES[srcIdx] ? new URL(SOURCES[srcIdx]).hostname : ''}`;
+            isLivePlaying = true;
+            stallCounter = 0;
+            setButtonState('playing');
+            appViewport.classList.add('is-playing');
+            setStatus('● 실시간 방송 청취 중', 'safe');
+            debugText.innerText = 'Live Streaming · Buffer Guard ON';
+            if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
+            updateBufferGauge();
         };
 
         audio.onwaiting = () => {
             if (!userWantsPlay) return;
-            isLive = false;
-            setUI('loading', '버퍼링 중...');
-            clearTimeout(bufferTimer);
-            bufferTimer = setTimeout(() => {
-                debug.innerText = 'Buffer timeout — switching source...';
-                tryNext();
-            }, BUFFER_TIMEOUT);
+            setButtonState('loading');
+            setStatus('네트워크 버퍼 충전 중...', 'warn');
+            updateBufferGauge();
         };
 
         audio.onstalled = () => {
             if (!userWantsPlay) return;
-            debug.innerText = 'Network stalled — jumping to live edge...';
-            jumpToLive();
+            debugText.innerText = 'Stalled → safe jump';
+            jumpToSafeMargin();
         };
 
         audio.onerror = () => {
             if (!userWantsPlay) return;
-            // HLS.js는 자체 에러 핸들러가 있으므로 네이티브 HLS(iOS)만 처리
-            if (!hls) {
-                debug.innerText = `Stream error — trying next...`;
-                tryNext();
-            }
+            setStatus('스트림 오류 — 자동 복구 시도...', 'warn');
+            setTimeout(() => { if (userWantsPlay) initStream(true); }, 1500);
         };
 
-        // ── iOS 화면 복귀 시 자동 재개 ───────────────────────
-        document.addEventListener('visibilitychange', () => {
-            if (document.visibilityState === 'visible' && userWantsPlay && audio.paused) {
-                audio.play().catch(() => jumpToLive());
+        // 1초 주기 모니터링: 데이터 및 스톨 감지
+        setInterval(() => {
+            updateBufferGauge();
+
+            if (!userWantsPlay) {
+                lastTickTime = 0;
+                stallCounter = 0;
+                return;
             }
+
+            const now = Date.now();
+            if (isLivePlaying && !audio.paused) {
+                if (lastTickTime > 0) {
+                    const dt = (now - lastTickTime) / 1000;
+                    totalDataBytes += (128 * 1024 / 8) * dt;
+                    metaRateEl.innerText = 'STREAM: 128 kbps';
+                    metaTotalEl.innerText = `DATA: ${(totalDataBytes / (1024 * 1024)).toFixed(1)} MB`;
+                }
+                lastTickTime = now;
+            } else {
+                lastTickTime = 0;
+            }
+
+            // 스톨(재생 멈춤) 정밀 감지
+            if (isLivePlaying && !audio.paused) {
+                if (audio.currentTime === lastAudioPosition) {
+                    stallCounter++;
+                    if (stallCounter === 4) {
+                        debugText.innerText = 'Stall detected → safe buffer jump';
+                        jumpToSafeMargin();
+                    } else if (stallCounter === 8) {
+                        debugText.innerText = 'Stall 8s → refreshing stream';
+                        initStream(true);
+                    } else if (stallCounter >= 14) {
+                        stallCounter = 0;
+                        switchBackupSource();
+                    }
+                } else {
+                    stallCounter = 0;
+                }
+                lastAudioPosition = audio.currentTime;
+            }
+        }, 1000);
+
+        function setButtonState(state) {
+            playBtn.classList.remove('is-loading', 'is-playing');
+            if (state === 'loading') playBtn.classList.add('is-loading');
+            if (state === 'playing') playBtn.classList.add('is-playing');
+        }
+
+        function setStatus(text, type = 'idle') {
+            statusCaption.innerText = text;
+            statusCaption.className = 'status-caption ' + (type === 'safe' ? 'safe' : type === 'warn' ? 'warn' : type === 'error' ? 'error' : '');
+        }
+
+        // 네트워크 재연결 시 자동 복구
+        window.addEventListener('online', () => {
+            if (userWantsPlay) {
+                setStatus('인터넷 재연결됨 — 방송 재개', 'warn');
+                initStream(true);
+            }
+        });
+
+        // 초기 편성표 로드
+        fetchLiveSchedules().catch(() => {
+            programTitleEl.innerText = 'MBC 표준FM (95.9MHz)';
+            progTimeEl.innerText = '실시간 스트리밍';
         });
     });
     </script>
