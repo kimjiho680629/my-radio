@@ -284,7 +284,7 @@
             text-overflow: ellipsis;
         }
 
-        /* ── 버퍼 상태 게이지 (슬릭 인디케이터) ── */
+        /* ── 버퍼 상태 게이지 (슬릭 인디케이터 & 모바일 적응형 네트워크) ── */
         .buffer-monitor {
             width: 100%;
             background: var(--surface-panel);
@@ -304,11 +304,57 @@
             margin-bottom: 8px;
         }
 
+        .buf-title-group {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+        }
+
         .buf-title {
             color: var(--text-tertiary);
             font-weight: 600;
             letter-spacing: 0.5px;
             text-transform: uppercase;
+        }
+
+        .net-tag {
+            font-size: 0.62rem;
+            font-weight: 700;
+            letter-spacing: 0.4px;
+            padding: 2px 7px;
+            border-radius: 6px;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: var(--text-secondary);
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            transition: all 0.3s ease;
+        }
+
+        .net-tag.optimal {
+            color: var(--accent-safe);
+            border-color: rgba(52, 199, 89, 0.35);
+            background: rgba(52, 199, 89, 0.12);
+        }
+
+        .net-tag.charging {
+            color: var(--accent-charging);
+            border-color: rgba(255, 159, 10, 0.35);
+            background: rgba(255, 159, 10, 0.12);
+        }
+
+        .net-tag.low {
+            color: var(--accent-live);
+            border-color: rgba(255, 59, 48, 0.35);
+            background: rgba(255, 59, 48, 0.12);
+        }
+
+        .net-dot {
+            width: 5px;
+            height: 5px;
+            border-radius: 50%;
+            background-color: currentColor;
         }
 
         .buf-stats {
@@ -580,10 +626,16 @@
             <div class="next-program-preview" id="next-prog">다음 방송 준비 중</div>
         </div>
 
-        <!-- 5. 버퍼 모니터 게이지 바 -->
+        <!-- 5. 버퍼 모니터 게이지 바 (모바일 적응형 네트워크) -->
         <div class="buffer-monitor">
             <div class="buffer-header">
-                <span class="buf-title">BUFFER RESERVE</span>
+                <div class="buf-title-group">
+                    <span class="buf-title">BUFFER RESERVE</span>
+                    <span class="net-tag optimal" id="net-tag">
+                        <span class="net-dot"></span>
+                        <span id="net-tag-text">모바일 오토</span>
+                    </span>
+                </div>
                 <div class="buf-stats">
                     <span class="buf-sec" id="buf-text">0s</span>
                     <span class="buf-pill pill-low" id="buf-pill">대기</span>
@@ -593,7 +645,8 @@
                 <div class="gauge-bar" id="gauge-bar"></div>
             </div>
             <div class="buffer-meta-row">
-                <span id="meta-rate">STREAM: 128 kbps</span>
+                <span id="meta-net-stat">NET: 모바일 4G/5G</span>
+                <span id="meta-target-delay">TARGET: -60s</span>
                 <span id="meta-total">DATA: 0.0 MB</span>
             </div>
         </div>
@@ -621,7 +674,7 @@
             <div class="status-caption" id="status-caption">재생 버튼을 탭하여 청취하세요</div>
         </div>
 
-        <div class="footer-debug" id="debug-text">60s Ultra Delay Buffer · Australia Edition</div>
+        <div class="footer-debug" id="debug-text">모바일 적응형 네트워크 가드 (v1.7.0) · Australia Edition</div>
     </div>
 
     <!-- 백그라운드 오디오 엘리먼트 -->
@@ -656,7 +709,10 @@
         const bufTextEl         = document.getElementById('buf-text');
         const bufPillEl         = document.getElementById('buf-pill');
         const gaugeBarEl        = document.getElementById('gauge-bar');
-        const metaRateEl        = document.getElementById('meta-rate');
+        const netTagEl          = document.getElementById('net-tag');
+        const netTagTextEl      = document.getElementById('net-tag-text');
+        const metaNetStatEl     = document.getElementById('meta-net-stat');
+        const metaTargetDelayEl = document.getElementById('meta-target-delay');
         const metaTotalEl       = document.getElementById('meta-total');
 
         // 상태 변수
@@ -668,7 +724,6 @@
         let lastSeoulCheckMin   = -1;
 
         // 버퍼링 및 통계
-        const TARGET_DELAY_SEC  = 60; // 60초 지연 지점 재생으로 전방 버퍼 확보
         let totalDataBytes      = 0;
         let lastTickTime        = 0;
         let lastAudioPosition   = -1;
@@ -681,6 +736,239 @@
             'https://stream.bsmbc.com/live/mp4:BusanMBC-LiveStream-AM/playlist.m3u8'
         ];
         let backupStreamIndex = 0;
+
+        // ──────────────────────────────────────────────────────────
+        // [v1.7.0] 모바일 적응형 네트워크 엔진 (Mobile Adaptive Guard)
+        // ──────────────────────────────────────────────────────────
+        class MobileAdaptiveEngine {
+            constructor() {
+                this.conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+                this.isMobileDevice = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || (navigator.maxTouchPoints > 0);
+                
+                this.networkType = this.isMobileDevice ? 'CELLULAR' : 'AUTO';
+                this.quality = 'GOOD';       // 'OPTIMAL' | 'GOOD' | 'FAIR' | 'POOR'
+                this.rtt = 0;               // ms
+                this.downlink = 0;          // Mbps
+                this.effectiveType = '4g';
+                
+                this.fragHistory = [];
+                this.lastSpeedKbps = 128;
+                this.lastPingTime = 0;
+                
+                // 모바일 환경에 특화된 동적 버퍼링 파라미터
+                this.targetDelaySec = 60;
+                this.maxBufferLength = 180;
+                this.fragLoadingTimeout = 18000;
+                this.fragLoadingMaxRetry = 12;
+                
+                this.setupListeners();
+                this.assessNetwork();
+                this.runLightweightPing();
+            }
+
+            setupListeners() {
+                if (this.conn) {
+                    this.conn.addEventListener('change', () => this.handleConnectionChange());
+                }
+
+                window.addEventListener('online', () => {
+                    this.assessNetwork();
+                    setStatus('인터넷 재연결 감지 — 방송 동기화', 'safe');
+                    if (userWantsPlay && (!isLivePlaying || audio.paused)) {
+                        initStream(true);
+                    }
+                });
+
+                window.addEventListener('offline', () => {
+                    this.quality = 'POOR';
+                    this.updateUI('📶 오프라인', 'low', 'NET: 연결 끊김', 'TARGET: 방어 중');
+                    setStatus('네트워크 오프라인 — 잔여 버퍼로 재생 유지', 'warn');
+                });
+            }
+
+            handleConnectionChange() {
+                const prevType = this.networkType;
+                this.assessNetwork();
+                
+                if (prevType !== this.networkType) {
+                    debugText.innerText = `Network switched: ${prevType} → ${this.networkType}`;
+                    const currentBuf = getBufferSeconds();
+                    
+                    if (isLivePlaying) {
+                        setStatus(`통신망 전환(${this.networkType}) — 무중단 유지`, 'warn');
+                        // 버퍼가 10초 미만으로 위험하면 신속하게 새 소켓으로 재연결
+                        if (currentBuf < 10) {
+                            setTimeout(() => {
+                                if (userWantsPlay) initStream(true);
+                            }, 500);
+                        }
+                    }
+                }
+            }
+
+            // HLS.js 세그먼트 전송 통계 실측 수신
+            recordFragStats(stats) {
+                if (!stats || !stats.loading) return;
+                const loadDuration = Math.max(1, stats.loading.end - stats.loading.start);
+                const bytes = stats.total || 0;
+                const speedKbps = Math.round((bytes * 8) / (loadDuration / 1000) / 1024);
+                
+                this.lastSpeedKbps = speedKbps;
+                this.fragHistory.push({ time: Date.now(), speed: speedKbps, duration: loadDuration });
+                if (this.fragHistory.length > 8) this.fragHistory.shift();
+
+                if (stats.loading.first && stats.loading.first > stats.loading.start) {
+                    const estRtt = Math.round(stats.loading.first - stats.loading.start);
+                    if (estRtt > 0 && estRtt < 4000) {
+                        this.rtt = estRtt;
+                    }
+                }
+
+                this.assessNetwork();
+            }
+
+            // iOS Safari 네이티브 등 HLS 미지원 환경을 위한 경량 핑 (25초 주기)
+            async runLightweightPing() {
+                const now = Date.now();
+                if (now - this.lastPingTime < 20000) return;
+                this.lastPingTime = now;
+
+                try {
+                    const t0 = performance.now();
+                    await fetch(`https://miniapi.imbc.com/favicon.ico?_t=${now}`, {
+                        method: 'HEAD',
+                        mode: 'no-cors',
+                        cache: 'no-store'
+                    });
+                    const t1 = performance.now();
+                    const measuredRtt = Math.round(t1 - t0);
+                    if (measuredRtt > 0 && measuredRtt < 5000) {
+                        this.rtt = measuredRtt;
+                        this.assessNetwork();
+                    }
+                } catch (e) {
+                    // 무시 (오프라인 등)
+                }
+            }
+
+            // 네트워크 상태 종합 판정 및 모바일 파라미터 자동 조절
+            assessNetwork() {
+                // 1. Connection API 분석
+                if (this.conn) {
+                    this.effectiveType = this.conn.effectiveType || '4g';
+                    this.downlink = this.conn.downlink || 0;
+                    if (this.conn.rtt && this.conn.rtt > 0) {
+                        this.rtt = this.conn.rtt;
+                    }
+
+                    if (this.conn.type === 'wifi' || this.conn.type === 'ethernet') {
+                        this.networkType = 'WIFI';
+                    } else if (this.conn.type === 'cellular') {
+                        this.networkType = 'CELLULAR';
+                    } else {
+                        this.networkType = this.isMobileDevice ? 'CELLULAR' : 'AUTO';
+                    }
+                } else {
+                    this.networkType = this.isMobileDevice ? 'CELLULAR' : 'AUTO';
+                }
+
+                // 2. 실측 속도 및 버퍼 상태 기반 종합 품질 판정
+                const avgSpeed = this.fragHistory.length > 0
+                    ? (this.fragHistory.reduce((s, f) => s + f.speed, 0) / this.fragHistory.length)
+                    : 1200;
+
+                const currentBuf = getBufferSeconds();
+
+                if (this.effectiveType === '2g' || this.effectiveType === 'slow-2g' || (avgSpeed < 180 && isLivePlaying) || (currentBuf < 6 && isLivePlaying && stallCounter > 1)) {
+                    this.quality = 'POOR';
+                } else if (this.effectiveType === '3g' || avgSpeed < 450 || this.rtt > 320) {
+                    this.quality = 'FAIR';
+                } else if (this.rtt < 120 && avgSpeed > 1500) {
+                    this.quality = 'OPTIMAL';
+                } else {
+                    this.quality = 'GOOD';
+                }
+
+                // 3. 모바일 환경에 따른 자동 버퍼/연결 파라미터 조절
+                if (this.quality === 'POOR') {
+                    // 모바일 음영지역/기지국 신호 저하: 버퍼 타깃과 재시도를 최대로 높여 버팀
+                    this.targetDelaySec = 85;
+                    this.maxBufferLength = 300; // 최대 5분 분량 사전 확보 시도
+                    this.fragLoadingTimeout = 28000;
+                    this.fragLoadingMaxRetry = 16;
+                } else if (this.quality === 'FAIR') {
+                    // 3G 또는 전파 불안정: 안전 지연 72초, 버퍼 240초
+                    this.targetDelaySec = 72;
+                    this.maxBufferLength = 240;
+                    this.fragLoadingTimeout = 22000;
+                    this.fragLoadingMaxRetry = 14;
+                } else if (this.quality === 'OPTIMAL') {
+                    // 5G/LTE 초고속 및 Wi-Fi 안정: 60초 지연, 180초 버퍼
+                    this.targetDelaySec = 60;
+                    this.maxBufferLength = 180;
+                    this.fragLoadingTimeout = 16000;
+                    this.fragLoadingMaxRetry = 10;
+                } else {
+                    // GOOD (일반 모바일 4G 표준)
+                    this.targetDelaySec = 65;
+                    this.maxBufferLength = 210;
+                    this.fragLoadingTimeout = 18000;
+                    this.fragLoadingMaxRetry = 12;
+                }
+
+                // 4. 동작 중인 HLS 인스턴스에 동적 반영
+                if (hls && hls.config) {
+                    hls.config.maxBufferLength = this.maxBufferLength;
+                    hls.config.fragLoadingTimeOut = this.fragLoadingTimeout;
+                    hls.config.fragLoadingMaxRetry = this.fragLoadingMaxRetry;
+                }
+
+                // 5. UI 실시간 업데이트
+                this.updateUI();
+            }
+
+            updateUI(overrideTag, overridePillClass, overrideNetStat, overrideDelay) {
+                if (!netTagTextEl || !netTagEl) return;
+
+                let tagText = '';
+                let pillClass = 'optimal';
+                let netStatText = '';
+
+                if (overrideTag) {
+                    tagText = overrideTag;
+                    pillClass = overridePillClass || 'optimal';
+                    netStatText = overrideNetStat || '';
+                } else {
+                    const isCell = this.networkType === 'CELLULAR' || this.isMobileDevice;
+                    const rttStr = this.rtt > 0 ? `${this.rtt}ms` : '정상';
+
+                    if (this.quality === 'OPTIMAL') {
+                        tagText = isCell ? '📶 5G/LTE 최적' : '📶 Wi-Fi 최적';
+                        pillClass = 'optimal';
+                        netStatText = `NET: ${isCell ? '모바일 초고속' : 'Wi-Fi'} (${rttStr})`;
+                    } else if (this.quality === 'GOOD') {
+                        tagText = isCell ? '📶 모바일 4G' : '📶 Wi-Fi 양호';
+                        pillClass = 'optimal';
+                        netStatText = `NET: ${isCell ? '모바일 원활' : 'Wi-Fi'} (${rttStr})`;
+                    } else if (this.quality === 'FAIR') {
+                        tagText = '📶 전파 변동 감지';
+                        pillClass = 'charging';
+                        netStatText = `NET: 모바일 지연 (${rttStr})`;
+                    } else {
+                        tagText = '📶 버퍼 긴급 방어';
+                        pillClass = 'low';
+                        netStatText = `NET: 신호 취약 (${rttStr})`;
+                    }
+                }
+
+                netTagTextEl.innerText = tagText;
+                netTagEl.className = `net-tag ${pillClass}`;
+                if (metaNetStatEl) metaNetStatEl.innerText = netStatText;
+                if (metaTargetDelayEl) metaTargetDelayEl.innerText = overrideDelay || `TARGET: -${this.targetDelaySec}s`;
+            }
+        }
+
+        const adaptiveEngine = new MobileAdaptiveEngine();
 
         // ──────────────────────────────────────────────────────────
         // 1. 실시간 듀얼 시계 & 편성표 자동 감시
@@ -996,23 +1284,32 @@
         }
 
         function startHlsEngine(streamUrl) {
+            adaptiveEngine.assessNetwork();
+
             hls = new Hls({
-                // 실시간보다 60초 과거 지점에서 재생 (충분한 선행 버퍼 확보)
-                liveSyncDurationCount:       18,
-                liveMaxLatencyDurationCount: 30,
-                maxBufferLength:            180,  // 전방 3분(180초) 데이터 사전 다운로드
-                maxMaxBufferLength:         420,  // 최대 7분
+                // 모바일 통신 상태에 따른 적응형 버퍼 및 지연 타깃 적용
+                liveSyncDurationCount:       Math.max(16, Math.round(adaptiveEngine.targetDelaySec / 3.5)),
+                liveMaxLatencyDurationCount: Math.max(26, Math.round(adaptiveEngine.targetDelaySec / 2.2)),
+                maxBufferLength:            adaptiveEngine.maxBufferLength,
+                maxMaxBufferLength:         adaptiveEngine.maxBufferLength + 120,
                 backBufferLength:            20,  // 지나간 버퍼 메모리 해제
                 maxBufferSize:       50 * 1024 * 1024,
                 startFragPrefetch:          true,
                 lowLatencyMode:            false,
-                manifestLoadingTimeOut:    15000,
-                fragLoadingTimeOut:        15000,
-                fragLoadingMaxRetry:          10
+                manifestLoadingTimeOut:    18000,
+                fragLoadingTimeOut:        adaptiveEngine.fragLoadingTimeout,
+                fragLoadingMaxRetry:       adaptiveEngine.fragLoadingMaxRetry
             });
 
             hls.loadSource(streamUrl);
             hls.attachMedia(audio);
+
+            // 실시간 세그먼트 전송 통계 수신 -> 모바일 대역폭 & RTT 실측
+            hls.on(Hls.Events.FRAG_LOADED, (_, data) => {
+                if (data && data.stats) {
+                    adaptiveEngine.recordFragStats(data.stats);
+                }
+            });
 
             hls.on(Hls.Events.MANIFEST_PARSED, () => {
                 debugText.innerText = 'Manifest ready. Buffer priming...';
@@ -1027,6 +1324,9 @@
                 if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
                     hls.recoverMediaError();
                 } else if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+                    // 모바일 핸드오버나 일시적 연결 실패 시 신속 복구 시도
+                    debugText.innerText = 'Network error → attempting quick load recovery';
+                    try { hls.startLoad(); } catch (e) {}
                     setTimeout(() => { if (userWantsPlay) initStream(true); }, 2000);
                 } else {
                     switchBackupSource();
@@ -1038,18 +1338,18 @@
             audio.src = streamUrl;
             audio.load();
 
-            // iOS Safari: 메타데이터 로드 시 60초 뒤로 점프하여 백그라운드 사전 다운로드 강제
+            // iOS Safari: 메타데이터 로드 시 모바일 적응형 지연 지점으로 이동하여 전방 버퍼 확보
             const applySafeOffset = () => {
                 if (initialBufferSeek) return;
                 try {
                     if (audio.seekable && audio.seekable.length > 0) {
                         const end = audio.seekable.end(0);
                         const start = audio.seekable.start(0);
-                        const target = Math.max(start, end - TARGET_DELAY_SEC);
+                        const target = Math.max(start, end - adaptiveEngine.targetDelaySec);
                         if (end - start > 15 && target < end - 10) {
                             audio.currentTime = target;
                             initialBufferSeek = true;
-                            debugText.innerText = `iOS 60s Buffer Primed (-${Math.round(end - target)}s)`;
+                            debugText.innerText = `iOS Safe Margin Primed (-${Math.round(end - target)}s)`;
                         }
                     }
                 } catch (e) {}
@@ -1078,7 +1378,7 @@
                 } else if (audio.seekable && audio.seekable.length > 0) {
                     const end = audio.seekable.end(0);
                     const start = audio.seekable.start(0);
-                    audio.currentTime = Math.max(start, end - TARGET_DELAY_SEC);
+                    audio.currentTime = Math.max(start, end - adaptiveEngine.targetDelaySec);
                 }
                 audio.play().catch(() => {});
             } catch (e) {
@@ -1170,9 +1470,11 @@
             setTimeout(() => { if (userWantsPlay) initStream(true); }, 1500);
         };
 
-        // 1초 주기 모니터링: 데이터 및 스톨 감지
+        // 1초 주기 모니터링: 데이터 및 스톨 감지 + 모바일 네트워크 실시간 평가
         setInterval(() => {
             updateBufferGauge();
+            adaptiveEngine.assessNetwork();
+            adaptiveEngine.runLightweightPing();
 
             if (!userWantsPlay) {
                 lastTickTime = 0;
@@ -1185,8 +1487,9 @@
                 if (lastTickTime > 0) {
                     const dt = (now - lastTickTime) / 1000;
                     totalDataBytes += (128 * 1024 / 8) * dt;
-                    metaRateEl.innerText = 'STREAM: 128 kbps';
-                    metaTotalEl.innerText = `DATA: ${(totalDataBytes / (1024 * 1024)).toFixed(1)} MB`;
+                    if (metaTotalEl) {
+                        metaTotalEl.innerText = `DATA: ${(totalDataBytes / (1024 * 1024)).toFixed(1)} MB`;
+                    }
                 }
                 lastTickTime = now;
             } else {
@@ -1224,14 +1527,6 @@
             statusCaption.innerText = text;
             statusCaption.className = 'status-caption ' + (type === 'safe' ? 'safe' : type === 'warn' ? 'warn' : type === 'error' ? 'error' : '');
         }
-
-        // 네트워크 재연결 시 자동 복구
-        window.addEventListener('online', () => {
-            if (userWantsPlay) {
-                setStatus('인터넷 재연결됨 — 방송 재개', 'warn');
-                initStream(true);
-            }
-        });
 
         // 초기 편성표 로드
         fetchLiveSchedules().catch(() => {
