@@ -31,7 +31,8 @@
 ## 📂 파일 구성
 - `index.html`: 모든 로직과 스타일이 통합된 메인 파일 (v1.7.0 모바일 적응형 네트워크 엔진 반영).
 - `README.md`: GitHub 배포 및 사용 가이드, 아이폰 홈화면 설치(PWA) 가이드 포함.
-- `manifest.json`: PWA 설정을 위한 메타데이터.
+- `manifest.json`: PWA 설정을 위한 메타데이터 (고화질 로컬 아이콘 등록).
+- `apple-touch-icon.png`, `icon-512.png`, `icon-192.png`, `favicon.svg`: 고해상도 프리미엄 다크 테크웨어 PWA 전용 아이콘 자산.
 
 ## 💡 다음에 이어서 작업할 때 (프롬프트 예시)
 "이전에 작업하던 **MBC 라디오 프로젝트** 이어서 진행해줘."
