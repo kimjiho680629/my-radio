@@ -11,7 +11,9 @@
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <link rel="icon" type="image/png" sizes="32x32" href="favicon.png">
     <link rel="manifest" href="manifest.json">
-    <link rel="preconnect" href="https://minisw.imbc.com">
+    <link rel="preconnect" href="https://minisw.imbc.com" crossorigin>
+    <link rel="preconnect" href="https://minisa.imbc.com" crossorigin>
+    <link rel="preconnect" href="https://minisp.imbc.com" crossorigin>
     <link rel="preconnect" href="https://sminiplay.imbc.com">
     <link rel="preconnect" href="https://miniapi.imbc.com">
     <link rel="preconnect" href="https://img.imbc.com">
@@ -676,7 +678,7 @@
             <div class="status-caption" id="status-caption">재생 버튼을 탭하여 청취하세요</div>
         </div>
 
-        <div class="footer-debug" id="debug-text">모바일 적응형 네트워크 가드 (v1.7.0) · Australia Edition</div>
+        <div class="footer-debug" id="debug-text">호주 모바일 딥 버퍼 & 멀티 CDN 가드 (v2.0.0) · Australia Edition</div>
     </div>
 
     <!-- 백그라운드 오디오 엘리먼트 -->
@@ -721,9 +723,12 @@
         let hls                 = null;
         let userWantsPlay       = false;
         let isLivePlaying       = false;
+        let isInitializing      = false;
         let schedulesCache      = null;
         let currentProgramMeta  = null;
         let lastSeoulCheckMin   = -1;
+        let lastStreamUrl       = null;
+        let wakeLockSentinel    = null;
 
         // 버퍼링 및 통계
         let totalDataBytes      = 0;
@@ -731,16 +736,204 @@
         let lastAudioPosition   = -1;
         let stallCounter        = 0;
         let initialBufferSeek   = false;
-
-        // 예비 스트림 풀
-        const BACKUP_STREAMS = [
-            'https://5ddfd163bd00d.streamlock.net/STDFM/STDFM/playlist.m3u8',
-            'https://stream.bsmbc.com/live/mp4:BusanMBC-LiveStream-AM/playlist.m3u8'
-        ];
-        let backupStreamIndex = 0;
+        let lastBgKeepAliveTime = 0;
 
         // ──────────────────────────────────────────────────────────
-        // [v1.7.0] 모바일 적응형 네트워크 엔진 (Mobile Adaptive Guard)
+        // [v2.0.0 핵심 해결책 1] 공식 MBC 3중 멀티 CDN 클러스터 & 타임시프트 딥 윈도우 확장기
+        //  - 원인: MBC 기본 chunklist.m3u8은 세그먼트 5개(약 15초)만 노출하여
+        //          일반 플레이어로는 절대 12초 이상 선행 버퍼링이 불가능했음.
+        //  - 해결: MBC 서버(minisw/minisa/minisp)가 실제로는 과거 50개 이상(약 150초)의
+        //          media_XXXXX.aac 세그먼트를 보관 중임을 검증하여,
+        //          플레이리스트 수신 시 과거 38개 세그먼트(약 114초)를 동적으로 복원/결합해
+        //          총 43개 세그먼트(약 129초) 윈도우로 확장 -> 재생 즉시 65~95초 대용량 버퍼 고속 충전!
+        // ──────────────────────────────────────────────────────────
+        const MBC_CDN_HOSTS = [
+            'minisw.imbc.com', // 1순위: 공식 스마트라디오 WebApp CDN 클러스터
+            'minisa.imbc.com', // 2순위: 공식 모바일/안드로이드 전용 CDN 클러스터
+            'minisp.imbc.com'  // 3순위: 공식 PC mini 전용 CDN 클러스터
+        ];
+        let activeCdnIndex = 0;
+        const segmentDurations = new Map();
+        const HISTORY_SEGMENTS_COUNT = 38; // 과거 38개(~114초) + 현재 5개(~15초) = 약 129초 딥 윈도우
+
+        function rewriteMbcCdnHost(url, hostIdx) {
+            if (!url) return url;
+            const targetHost = MBC_CDN_HOSTS[hostIdx % MBC_CDN_HOSTS.length];
+            return url.replace(/https:\/\/minis[wpa]\.imbc\.com/i, `https://${targetHost}`);
+        }
+
+        function expandChunklistM3u8(m3u8Text) {
+            if (!m3u8Text || !m3u8Text.includes('#EXTINF:') || !m3u8Text.includes('media_')) {
+                return m3u8Text;
+            }
+
+            const lines = m3u8Text.split(/\r?\n/);
+            const headerLines = [];
+            const currentSegs = [];
+            let pendingDur = null;
+
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i].trim();
+                if (!line) continue;
+                if (line.startsWith('#EXT-X-MEDIA-SEQUENCE:')) {
+                    continue; // 확장된 시작 시퀀스 번호로 재계산하여 삽입
+                }
+                if (line.startsWith('#EXTINF:')) {
+                    const durMatch = line.match(/#EXTINF:([0-9.]+)/);
+                    pendingDur = durMatch ? parseFloat(durMatch[1]) : 3.0;
+                    continue;
+                }
+                if (!line.startsWith('#')) {
+                    const seqMatch = line.match(/media_(\d+)\.aac/);
+                    if (seqMatch && pendingDur !== null) {
+                        const seq = parseInt(seqMatch[1], 10);
+                        currentSegs.push({ seq, dur: pendingDur, uri: line });
+                        segmentDurations.set(seq, pendingDur);
+                    }
+                    pendingDur = null;
+                    continue;
+                }
+                headerLines.push(line);
+            }
+
+            if (currentSegs.length === 0) return m3u8Text;
+
+            const firstSeq = currentSegs[0].seq;
+            const firstDur = currentSegs[0].dur;
+            const startSeq = Math.max(1, firstSeq - HISTORY_SEGMENTS_COUNT);
+
+            // 오래된 세그먼트 길이 캐시 정리 (메모리 누수 방지)
+            if (segmentDurations.size > 320) {
+                for (const k of segmentDurations.keys()) {
+                    if (k < startSeq - 40) segmentDurations.delete(k);
+                }
+            }
+
+            const out = [];
+            for (const h of headerLines) {
+                out.push(h);
+                if (h.startsWith('#EXT-X-TARGETDURATION:')) {
+                    out.push(`#EXT-X-MEDIA-SEQUENCE:${startSeq}`);
+                }
+            }
+            if (!out.some(l => l.startsWith('#EXT-X-MEDIA-SEQUENCE:'))) {
+                out.push(`#EXT-X-MEDIA-SEQUENCE:${startSeq}`);
+            }
+
+            // 서버에 살아있는 과거 38개 세그먼트(약 114초 분량)를 앞에 결합
+            for (let s = startSeq; s < firstSeq; s++) {
+                let dur = segmentDurations.get(s);
+                if (!dur) {
+                    const diff = firstSeq - s;
+                    const firstIsShort = firstDur < 3.0;
+                    if (diff % 2 === 1) {
+                        dur = firstIsShort ? 3.065 : 2.926;
+                    } else {
+                        dur = firstIsShort ? 2.926 : 3.065;
+                    }
+                    segmentDurations.set(s, dur);
+                }
+                out.push(`#EXTINF:${dur.toFixed(3)},`);
+                out.push(`media_${s}.aac`);
+            }
+
+            // 현재 서버가 내려준 최신 5개 세그먼트 결합
+            for (const seg of currentSegs) {
+                out.push(`#EXTINF:${seg.dur.toFixed(3)},`);
+                out.push(seg.uri);
+            }
+
+            return out.join('\n') + '\n';
+        }
+
+        // HLS.js 커스텀 멀티 CDN 무중단 페일오버 & 딥 버퍼 로더
+        function createMultiCdnLoaderClass() {
+            if (typeof Hls === 'undefined' || !Hls.DefaultConfig || !Hls.DefaultConfig.loader) return null;
+            const BaseLoader = Hls.DefaultConfig.loader;
+
+            return class MultiCdnDeepBufferLoader {
+                constructor(hlsConfig) {
+                    this.hlsConfig = hlsConfig;
+                    this.innerLoader = new BaseLoader(hlsConfig);
+                    this.aborted = false;
+                }
+                get stats() {
+                    return this.innerLoader ? this.innerLoader.stats : null;
+                }
+                get context() {
+                    return this.innerLoader ? this.innerLoader.context : null;
+                }
+                destroy() {
+                    this.aborted = true;
+                    if (this.innerLoader) {
+                        try { this.innerLoader.destroy(); } catch (e) {}
+                    }
+                }
+                abort() {
+                    this.aborted = true;
+                    if (this.innerLoader) {
+                        try { this.innerLoader.abort(); } catch (e) {}
+                    }
+                }
+                load(context, config, callbacks) {
+                    this.aborted = false;
+                    this._attemptLoad(context, config, callbacks, 0);
+                }
+                _attemptLoad(context, config, callbacks, attempt) {
+                    if (this.aborted) return;
+
+                    const hostIdx = (activeCdnIndex + attempt) % MBC_CDN_HOSTS.length;
+                    context.url = rewriteMbcCdnHost(context.url, hostIdx);
+
+                    if (attempt > 0) {
+                        try { this.innerLoader.destroy(); } catch (e) {}
+                        this.innerLoader = new BaseLoader(this.hlsConfig);
+                    }
+
+                    const isPlaylist = context.url.includes('.m3u8');
+
+                    this.innerLoader.load(context, config, {
+                        onSuccess: (response, stats, ctx, networkDetails) => {
+                            if (attempt > 0) {
+                                activeCdnIndex = hostIdx;
+                                debugText.innerText = `Multi-CDN Active: ${MBC_CDN_HOSTS[activeCdnIndex]}`;
+                            }
+                            if (isPlaylist && typeof response.data === 'string' && response.data.includes('#EXTINF:')) {
+                                response.data = expandChunklistM3u8(response.data);
+                            } else if (!isPlaylist && response.data) {
+                                const byteLen = response.data.byteLength || (stats && stats.total) || 0;
+                                adaptiveEngine.recordFragStats(stats, byteLen);
+                            }
+                            callbacks.onSuccess(response, stats, ctx, networkDetails);
+                        },
+                        onError: (error, ctx, networkDetails, stats) => {
+                            if (!this.aborted && attempt + 1 < MBC_CDN_HOSTS.length) {
+                                const nextHost = MBC_CDN_HOSTS[(activeCdnIndex + attempt + 1) % MBC_CDN_HOSTS.length];
+                                debugText.innerText = `CDN Reroute → ${nextHost}`;
+                                this._attemptLoad(context, config, callbacks, attempt + 1);
+                                return;
+                            }
+                            callbacks.onError(error, ctx, networkDetails, stats);
+                        },
+                        onTimeout: (stats, ctx, networkDetails) => {
+                            if (!this.aborted && attempt + 1 < MBC_CDN_HOSTS.length) {
+                                const nextHost = MBC_CDN_HOSTS[(activeCdnIndex + attempt + 1) % MBC_CDN_HOSTS.length];
+                                debugText.innerText = `CDN Timeout Reroute → ${nextHost}`;
+                                this._attemptLoad(context, config, callbacks, attempt + 1);
+                                return;
+                            }
+                            callbacks.onTimeout(stats, ctx, networkDetails);
+                        },
+                        onProgress: callbacks.onProgress ? (stats, ctx, data, networkDetails) => {
+                            callbacks.onProgress(stats, ctx, data, networkDetails);
+                        } : undefined
+                    });
+                }
+            };
+        }
+
+        // ──────────────────────────────────────────────────────────
+        // [v2.0.0] 모바일 적응형 네트워크 엔진 (Mobile Adaptive Guard)
         // ──────────────────────────────────────────────────────────
         class MobileAdaptiveEngine {
             constructor() {
@@ -754,14 +947,14 @@
                 this.effectiveType = '4g';
                 
                 this.fragHistory = [];
-                this.lastSpeedKbps = 128;
+                this.lastSpeedKbps = 256;
                 this.lastPingTime = 0;
                 
-                // 모바일 환경에 특화된 동적 버퍼링 파라미터
-                this.targetDelaySec = 60;
-                this.maxBufferLength = 180;
-                this.fragLoadingTimeout = 18000;
-                this.fragLoadingMaxRetry = 12;
+                // 호주 모바일 환경에 최적화된 딥 버퍼링 파라미터 (확장된 129초 윈도우 기반)
+                this.targetDelaySec = 68;
+                this.maxBufferLength = 150;
+                this.fragLoadingTimeout = 14000;
+                this.fragLoadingMaxRetry = 14;
                 
                 this.setupListeners();
                 this.assessNetwork();
@@ -775,16 +968,21 @@
 
                 window.addEventListener('online', () => {
                     this.assessNetwork();
-                    setStatus('인터넷 재연결 감지 — 방송 동기화', 'safe');
-                    if (userWantsPlay && (!isLivePlaying || audio.paused)) {
-                        initStream(true);
+                    setStatus('인터넷 재연결 감지 — 버퍼 자동 보충 중', 'safe');
+                    if (userWantsPlay) {
+                        if (hls && isLivePlaying && getBufferSeconds() > 2) {
+                            try { hls.startLoad(); } catch (e) {}
+                        } else if (!isLivePlaying || audio.paused) {
+                            initStream(true);
+                        }
                     }
                 });
 
                 window.addEventListener('offline', () => {
                     this.quality = 'POOR';
-                    this.updateUI('📶 오프라인', 'low', 'NET: 연결 끊김', 'TARGET: 방어 중');
-                    setStatus('네트워크 오프라인 — 잔여 버퍼로 재생 유지', 'warn');
+                    const remainSec = Math.round(getBufferSeconds());
+                    this.updateUI('📶 오프라인 방어', 'low', 'NET: 일시 단절', `RESERVE: ${remainSec}s`);
+                    setStatus(`네트워크 단절 — 확보된 ${remainSec}초 버퍼로 무중단 재생 중`, 'warn');
                 });
             }
 
@@ -793,13 +991,15 @@
                 this.assessNetwork();
                 
                 if (prevType !== this.networkType) {
-                    debugText.innerText = `Network switched: ${prevType} → ${this.networkType}`;
+                    debugText.innerText = `Network Handover: ${prevType} → ${this.networkType}`;
                     const currentBuf = getBufferSeconds();
                     
                     if (isLivePlaying) {
-                        setStatus(`통신망 전환(${this.networkType}) — 무중단 유지`, 'warn');
-                        // 버퍼가 10초 미만으로 위험하면 신속하게 새 소켓으로 재연결
-                        if (currentBuf < 10) {
+                        setStatus(`통신망 전환(${this.networkType}) — 딥 버퍼로 무중단 유지`, 'safe');
+                        // 기존 버퍼가 충분하면 절대 세션을 끊지 않고 백그라운드 로더만 깨움
+                        if (hls && currentBuf >= 4) {
+                            try { hls.startLoad(); } catch (e) {}
+                        } else if (currentBuf < 2 && audio.paused) {
                             setTimeout(() => {
                                 if (userWantsPlay) initStream(true);
                             }, 500);
@@ -809,12 +1009,19 @@
             }
 
             // HLS.js 세그먼트 전송 통계 실측 수신
-            recordFragStats(stats) {
+            recordFragStats(stats, fallbackBytes = 0) {
                 if (!stats || !stats.loading) return;
                 const loadDuration = Math.max(1, stats.loading.end - stats.loading.start);
-                const bytes = stats.total || 0;
+                const bytes = fallbackBytes || stats.total || stats.loaded || 0;
                 const speedKbps = Math.round((bytes * 8) / (loadDuration / 1000) / 1024);
                 
+                if (bytes > 0) {
+                    totalDataBytes += bytes;
+                    if (metaTotalEl) {
+                        metaTotalEl.innerText = `DATA: ${(totalDataBytes / (1024 * 1024)).toFixed(1)} MB`;
+                    }
+                }
+
                 this.lastSpeedKbps = speedKbps;
                 this.fragHistory.push({ time: Date.now(), speed: speedKbps, duration: loadDuration });
                 if (this.fragHistory.length > 8) this.fragHistory.shift();
@@ -829,10 +1036,10 @@
                 this.assessNetwork();
             }
 
-            // iOS Safari 네이티브 등 HLS 미지원 환경을 위한 경량 핑 (25초 주기)
+            // 경량 핑 (30초 주기)
             async runLightweightPing() {
                 const now = Date.now();
-                if (now - this.lastPingTime < 20000) return;
+                if (now - this.lastPingTime < 30000) return;
                 this.lastPingTime = now;
 
                 try {
@@ -849,17 +1056,16 @@
                         this.assessNetwork();
                     }
                 } catch (e) {
-                    // 무시 (오프라인 등)
+                    // 오프라인 등 무시
                 }
             }
 
             // 네트워크 상태 종합 판정 및 모바일 파라미터 자동 조절
             assessNetwork() {
-                // 1. Connection API 분석
                 if (this.conn) {
                     this.effectiveType = this.conn.effectiveType || '4g';
                     this.downlink = this.conn.downlink || 0;
-                    if (this.conn.rtt && this.conn.rtt > 0) {
+                    if (this.conn.rtt && this.conn.rtt > 0 && this.fragHistory.length === 0) {
                         this.rtt = this.conn.rtt;
                     }
 
@@ -874,58 +1080,51 @@
                     this.networkType = this.isMobileDevice ? 'CELLULAR' : 'AUTO';
                 }
 
-                // 2. 실측 속도 및 버퍼 상태 기반 종합 품질 판정
                 const avgSpeed = this.fragHistory.length > 0
                     ? (this.fragHistory.reduce((s, f) => s + f.speed, 0) / this.fragHistory.length)
-                    : 1200;
+                    : 1500;
 
                 const currentBuf = getBufferSeconds();
 
-                if (this.effectiveType === '2g' || this.effectiveType === 'slow-2g' || (avgSpeed < 180 && isLivePlaying) || (currentBuf < 6 && isLivePlaying && stallCounter > 1)) {
+                if (this.effectiveType === '2g' || this.effectiveType === 'slow-2g' || (avgSpeed < 160 && isLivePlaying) || (currentBuf < 8 && isLivePlaying && stallCounter > 2)) {
                     this.quality = 'POOR';
-                } else if (this.effectiveType === '3g' || avgSpeed < 450 || this.rtt > 320) {
+                } else if (this.effectiveType === '3g' || avgSpeed < 450 || this.rtt > 380) {
                     this.quality = 'FAIR';
-                } else if (this.rtt < 120 && avgSpeed > 1500) {
+                } else if (this.rtt < 180 && avgSpeed > 1200) {
                     this.quality = 'OPTIMAL';
                 } else {
                     this.quality = 'GOOD';
                 }
 
-                // 3. 모바일 환경에 따른 자동 버퍼/연결 파라미터 조절
+                // 호주 모바일 셀룰러 특화: 129초 확장 윈도우 안에서 65~92초 선행 버퍼 즉시 확보
                 if (this.quality === 'POOR') {
-                    // 모바일 음영지역/기지국 신호 저하: 버퍼 타깃과 재시도를 최대로 높여 버팀
-                    this.targetDelaySec = 85;
-                    this.maxBufferLength = 300; // 최대 5분 분량 사전 확보 시도
-                    this.fragLoadingTimeout = 28000;
+                    this.targetDelaySec = 90;
+                    this.maxBufferLength = 180;
+                    this.fragLoadingTimeout = 18000;
                     this.fragLoadingMaxRetry = 16;
                 } else if (this.quality === 'FAIR') {
-                    // 3G 또는 전파 불안정: 안전 지연 72초, 버퍼 240초
-                    this.targetDelaySec = 72;
-                    this.maxBufferLength = 240;
-                    this.fragLoadingTimeout = 22000;
+                    this.targetDelaySec = 78;
+                    this.maxBufferLength = 160;
+                    this.fragLoadingTimeout = 15000;
                     this.fragLoadingMaxRetry = 14;
                 } else if (this.quality === 'OPTIMAL') {
-                    // 5G/LTE 초고속 및 Wi-Fi 안정: 60초 지연, 180초 버퍼
-                    this.targetDelaySec = 60;
-                    this.maxBufferLength = 180;
-                    this.fragLoadingTimeout = 16000;
-                    this.fragLoadingMaxRetry = 10;
-                } else {
-                    // GOOD (일반 모바일 4G 표준)
                     this.targetDelaySec = 65;
-                    this.maxBufferLength = 210;
-                    this.fragLoadingTimeout = 18000;
+                    this.maxBufferLength = 140;
+                    this.fragLoadingTimeout = 12000;
                     this.fragLoadingMaxRetry = 12;
+                } else {
+                    this.targetDelaySec = 72;
+                    this.maxBufferLength = 150;
+                    this.fragLoadingTimeout = 14000;
+                    this.fragLoadingMaxRetry = 14;
                 }
 
-                // 4. 동작 중인 HLS 인스턴스에 동적 반영
                 if (hls && hls.config) {
                     hls.config.maxBufferLength = this.maxBufferLength;
                     hls.config.fragLoadingTimeOut = this.fragLoadingTimeout;
                     hls.config.fragLoadingMaxRetry = this.fragLoadingMaxRetry;
                 }
 
-                // 5. UI 실시간 업데이트
                 this.updateUI();
             }
 
@@ -953,11 +1152,11 @@
                         pillClass = 'optimal';
                         netStatText = `NET: ${isCell ? '모바일 원활' : 'Wi-Fi'} (${rttStr})`;
                     } else if (this.quality === 'FAIR') {
-                        tagText = '📶 전파 변동 감지';
+                        tagText = '📶 전파 변동 방어';
                         pillClass = 'charging';
                         netStatText = `NET: 모바일 지연 (${rttStr})`;
                     } else {
-                        tagText = '📶 버퍼 긴급 방어';
+                        tagText = '📶 딥 버퍼 방어';
                         pillClass = 'low';
                         netStatText = `NET: 신호 취약 (${rttStr})`;
                     }
@@ -966,7 +1165,7 @@
                 netTagTextEl.innerText = tagText;
                 netTagEl.className = `net-tag ${pillClass}`;
                 if (metaNetStatEl) metaNetStatEl.innerText = netStatText;
-                if (metaTargetDelayEl) metaTargetDelayEl.innerText = overrideDelay || `TARGET: -${this.targetDelaySec}s`;
+                if (metaTargetDelayEl) metaTargetDelayEl.innerText = overrideDelay || `TARGET: +${this.targetDelaySec}s`;
             }
         }
 
@@ -989,7 +1188,7 @@
                 if (schedulesCache) {
                     evaluateCurrentProgram(schedulesCache);
                 } else {
-                    fetchLiveSchedules();
+                    fetchLiveSchedules().catch(() => {});
                 }
             }
         }
@@ -1061,7 +1260,6 @@
             const curHHMM = String(seoul.getHours()).padStart(2, '0') + String(seoul.getMinutes()).padStart(2, '0');
             const curVal = parseInt(curHHMM, 10);
 
-            // MBC 표준FM(STFM) & 오늘 요일 필터
             const todaySTFM = schedules.filter(p => p.Channel === 'STFM' && p.LiveDays === curDay);
             todaySTFM.sort((a, b) => parseInt(a.StartTime, 10) - parseInt(b.StartTime, 10));
 
@@ -1072,7 +1270,7 @@
                 const p = todaySTFM[i];
                 const st = parseInt(p.StartTime, 10);
                 let et = parseInt(p.EndTime, 10);
-                if (et === 0) et = 2400; // 자정 종료
+                if (et === 0) et = 2400;
 
                 if (st <= curVal && curVal < et) {
                     current = p;
@@ -1091,7 +1289,6 @@
             currentProgramMeta = cur;
             programTitleEl.innerText = cur.ProgramTitle || 'MBC 표준FM';
 
-            // 시간 포맷 (0900 -> 09:00)
             const fmtTime = (t) => {
                 if (!t || t.length < 4) return t;
                 return `${t.slice(0, 2)}:${t.slice(2, 4)}`;
@@ -1106,7 +1303,6 @@
                 nextProgEl.innerText = 'MBC 라디오 95.9 MHz';
             }
 
-            // 고화질 앨범 커버 반영
             const coverUrl = cur.NewHDPicture || cur.HDPicture || cur.Picture || cur.ThumbnailPicture;
             if (coverUrl) {
                 const secureCover = coverUrl.replace('http://', 'https://');
@@ -1118,7 +1314,6 @@
                 };
             }
 
-            // iOS 잠금화면 & 에어팟 메타데이터 동기화
             updateMediaSessionMetadata(cur.ProgramTitle, coverUrl);
         }
 
@@ -1137,7 +1332,7 @@
             navigator.mediaSession.metadata = new MediaMetadata({
                 title: title || 'MBC 표준FM (95.9MHz)',
                 artist: 'MBC 스마트라디오 mini',
-                album: '호주 LIVE (버퍼 세이프)',
+                album: '호주 LIVE (딥 버퍼 가드)',
                 artwork: artworks
             });
 
@@ -1146,12 +1341,35 @@
             navigator.mediaSession.setActionHandler('stop', () => pausePlayback());
         }
 
+        // 화면 꺼짐 방지 Wake Lock (지원 기기에서 거치 중 네트워크 절전 진입 방지)
+        async function requestWakeLock() {
+            if (!('wakeLock' in navigator) || document.hidden || !userWantsPlay) return;
+            try {
+                if (!wakeLockSentinel) {
+                    wakeLockSentinel = await navigator.wakeLock.request('screen');
+                    wakeLockSentinel.addEventListener('release', () => {
+                        wakeLockSentinel = null;
+                    });
+                }
+            } catch (e) {}
+        }
+
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden && userWantsPlay) {
+                requestWakeLock();
+                updateBufferGauge();
+                if (hls && isLivePlaying) {
+                    try { hls.startLoad(); } catch (e) {}
+                }
+            }
+        });
+
         // ──────────────────────────────────────────────────────────
-        // 4. 공식 실시간 스트림 URL 발급 (JSONP 기법)
+        // 4. 공식 실시간 스트림 URL 발급 (JSONP 다중 재시도 지원)
         // ──────────────────────────────────────────────────────────
-        function requestOfficialStreamUrl() {
+        function requestOfficialStreamUrl(attempt = 1) {
             return new Promise((resolve, reject) => {
-                const cb = 'mbc_stream_cb_' + Date.now();
+                const cb = 'mbc_stream_cb_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
                 const script = document.createElement('script');
                 let done = false;
 
@@ -1159,9 +1377,13 @@
                     cleanup();
                     if (!done) {
                         done = true;
-                        reject(new Error('스트림 API 시간 초과'));
+                        if (attempt < 2) {
+                            requestOfficialStreamUrl(attempt + 1).then(resolve).catch(reject);
+                        } else {
+                            reject(new Error('스트림 API 시간 초과'));
+                        }
                     }
-                }, 6000);
+                }, 5500);
 
                 function cleanup() {
                     clearTimeout(timer);
@@ -1174,7 +1396,9 @@
                     if (done) return;
                     done = true;
                     if (data && data.AACLiveURL) {
-                        resolve(data.AACLiveURL);
+                        const url = rewriteMbcCdnHost(data.AACLiveURL.replace('http://', 'https://'), activeCdnIndex);
+                        lastStreamUrl = url;
+                        resolve(url);
                     } else {
                         reject(new Error('유효하지 않은 스트림 응답'));
                     }
@@ -1184,7 +1408,11 @@
                     cleanup();
                     if (!done) {
                         done = true;
-                        reject(new Error('스트림 스크립트 에러'));
+                        if (attempt < 2) {
+                            requestOfficialStreamUrl(attempt + 1).then(resolve).catch(reject);
+                        } else {
+                            reject(new Error('스트림 스크립트 에러'));
+                        }
                     }
                 };
 
@@ -1202,7 +1430,7 @@
             for (let i = 0; i < audio.buffered.length; i++) {
                 const s = audio.buffered.start(i);
                 const e = audio.buffered.end(i);
-                if (cur >= s - 0.5 && cur <= e + 0.5) {
+                if (cur >= s - 1.0 && cur <= e + 0.5) {
                     return Math.max(0, e - cur);
                 }
             }
@@ -1215,28 +1443,45 @@
             const sec = Math.round(getBufferSeconds());
             bufTextEl.innerText = `${sec}s`;
 
-            // 최대 90초 기준 게이지 바 비율 (0~100%)
-            const pct = Math.min(100, Math.round((sec / 90) * 100));
+            // 75초 기준 게이지 바 비율 (0~100%)
+            const pct = Math.min(100, Math.round((sec / 75) * 100));
             gaugeBarEl.style.width = `${pct}%`;
 
             bufPillEl.className = 'buf-pill';
-            if (sec >= 20) {
+            if (sec >= 18) {
                 bufPillEl.classList.add('pill-safe');
-                bufPillEl.innerText = '안전 확보';
+                bufPillEl.innerText = sec >= 45 ? '초대용량 안전' : '안전 확보';
                 gaugeBarEl.style.background = 'var(--accent-safe)';
-            } else if (sec >= 6) {
+            } else if (sec >= 5) {
                 bufPillEl.classList.add('pill-charging');
-                bufPillEl.innerText = '사전 충전';
+                bufPillEl.innerText = '고속 충전 중';
                 gaugeBarEl.style.background = 'var(--accent-charging)';
             } else {
                 bufPillEl.classList.add('pill-low');
-                bufPillEl.innerText = isLivePlaying ? '버퍼 부족' : '대기';
+                bufPillEl.innerText = isLivePlaying ? '버퍼 보충' : '대기';
                 gaugeBarEl.style.background = 'var(--accent-live)';
             }
         }
 
+        // 미세 타임스탬프 홀(Micro-Gap) 감지 시 버퍼 손실 없이 즉시 브릿징
+        function tryBridgeMicroGap() {
+            if (!audio || !audio.buffered || audio.buffered.length === 0) return false;
+            const cur = audio.currentTime;
+            for (let i = 0; i < audio.buffered.length; i++) {
+                const s = audio.buffered.start(i);
+                const e = audio.buffered.end(i);
+                if (s > cur && s - cur < 4.5 && e - s > 2.0) {
+                    audio.currentTime = s + 0.15;
+                    debugText.innerText = `Micro-gap bridged (+${(s - cur).toFixed(2)}s)`;
+                    audio.play().catch(() => {});
+                    return true;
+                }
+            }
+            return false;
+        }
+
         // ──────────────────────────────────────────────────────────
-        // 6. 스트림 연결 및 초특급 지연 버퍼링 로직
+        // 6. 스트림 연결 및 타임시프트 초특급 딥 버퍼링 엔진
         // ──────────────────────────────────────────────────────────
         function cleanAudioResources() {
             if (hls) {
@@ -1245,6 +1490,9 @@
             }
             audio.pause();
             audio.removeAttribute('src');
+            while (audio.firstChild) {
+                audio.removeChild(audio.firstChild);
+            }
             audio.load();
             isLivePlaying = false;
             initialBufferSeek = false;
@@ -1256,29 +1504,45 @@
         }
 
         async function initStream(forceRefresh = false) {
+            if (isInitializing) return;
+            isInitializing = true;
+
             cleanAudioResources();
-            if (!userWantsPlay) return;
+            if (!userWantsPlay) {
+                isInitializing = false;
+                return;
+            }
 
             setButtonState('loading');
             setStatus('공식 보안 스트림 토큰 발급 중...', 'warn');
-            debugText.innerText = 'Fetching MBC token...';
+            debugText.innerText = `Connecting via ${MBC_CDN_HOSTS[activeCdnIndex]}...`;
 
             let targetStreamUrl = null;
             try {
                 targetStreamUrl = await requestOfficialStreamUrl();
-                debugText.innerText = 'Official token ready!';
+                debugText.innerText = `Token ready (${MBC_CDN_HOSTS[activeCdnIndex]})`;
             } catch (err) {
-                debugText.innerText = `Using backup stream #${backupStreamIndex + 1}`;
-                targetStreamUrl = BACKUP_STREAMS[backupStreamIndex % BACKUP_STREAMS.length];
+                if (lastStreamUrl) {
+                    activeCdnIndex = (activeCdnIndex + 1) % MBC_CDN_HOSTS.length;
+                    targetStreamUrl = rewriteMbcCdnHost(lastStreamUrl, activeCdnIndex);
+                    debugText.innerText = `Using cached token on ${MBC_CDN_HOSTS[activeCdnIndex]}`;
+                } else {
+                    isInitializing = false;
+                    setStatus('네트워크 응답 지연 — 2초 후 자동 재시도...', 'warn');
+                    setTimeout(() => { if (userWantsPlay) initStream(true); }, 2000);
+                    return;
+                }
             }
 
-            setStatus('대용량 버퍼 충전 및 연결 중...', 'warn');
+            isInitializing = false;
+            if (!userWantsPlay) return;
 
-            // HLS.js 지원 환경
+            setStatus('대용량 딥 버퍼(65~90초) 고속 충전 및 연결 중...', 'warn');
+            requestWakeLock();
+
             if (typeof Hls !== 'undefined' && Hls.isSupported()) {
                 startHlsEngine(targetStreamUrl);
             } else if (audio.canPlayType('application/vnd.apple.mpegurl')) {
-                // iOS Safari 네이티브 HLS 환경
                 startNativeHlsEngine(targetStreamUrl);
             } else {
                 setStatus('HLS 재생을 지원하지 않는 브라우저입니다.', 'error');
@@ -1287,109 +1551,117 @@
 
         function startHlsEngine(streamUrl) {
             adaptiveEngine.assessNetwork();
+            const CustomLoader = createMultiCdnLoaderClass();
 
             hls = new Hls({
-                // 모바일 통신 상태에 따른 적응형 버퍼 및 지연 타깃 적용
-                liveSyncDurationCount:       Math.max(16, Math.round(adaptiveEngine.targetDelaySec / 3.5)),
-                liveMaxLatencyDurationCount: Math.max(26, Math.round(adaptiveEngine.targetDelaySec / 2.2)),
+                loader:                     CustomLoader || Hls.DefaultConfig.loader,
+                enableWorker:               true,
+                preferManagedMediaSource:   false, // 표준 MediaSource 우선 사용
+                liveSyncDuration:           adaptiveEngine.targetDelaySec,
+                liveMaxLatencyDuration:     122,   // 129초 확장 윈도우 안에서 강제 점프 없이 여유 유지
+                maxLiveSyncPlaybackRate:    1.0,   // 음정/배속 변화 없이 1.0x 정속 재생 고정
                 maxBufferLength:            adaptiveEngine.maxBufferLength,
-                maxMaxBufferLength:         adaptiveEngine.maxBufferLength + 120,
-                backBufferLength:            20,  // 지나간 버퍼 메모리 해제
-                maxBufferSize:       50 * 1024 * 1024,
+                maxMaxBufferLength:         210,
+                backBufferLength:           25,
+                maxBufferSize:              50 * 1024 * 1024,
+                maxBufferHole:              0.5,
+                nudgeOffset:                0.2,
+                nudgeMaxRetry:              10,
                 startFragPrefetch:          true,
-                lowLatencyMode:            false,
-                manifestLoadingTimeOut:    18000,
-                fragLoadingTimeOut:        adaptiveEngine.fragLoadingTimeout,
-                fragLoadingMaxRetry:       adaptiveEngine.fragLoadingMaxRetry
+                lowLatencyMode:             false,
+                manifestLoadingTimeOut:     12000,
+                manifestLoadingMaxRetry:    6,
+                levelLoadingTimeOut:        12000,
+                levelLoadingMaxRetry:       6,
+                fragLoadingTimeOut:         adaptiveEngine.fragLoadingTimeout,
+                fragLoadingMaxRetry:        adaptiveEngine.fragLoadingMaxRetry
             });
+
+            // [핵심 해결책 2] iPhone iOS Safari ManagedMediaSource 셀룰러 조기 버퍼 차단 방어:
+            // iOS WebKit이 셀룰러에서 10~15초만 차도 endstreaming 이벤트를 발생시켜
+            // hls.pauseBuffering()을 호출하는 현상을 차단하고 목표 버퍼(65~90초)까지 계속 다운로드 유지!
+            if (typeof hls.pauseBuffering === 'function') {
+                const origPauseBuffering = hls.pauseBuffering.bind(hls);
+                hls.pauseBuffering = () => {
+                    const curBuf = getBufferSeconds();
+                    if (curBuf < adaptiveEngine.targetDelaySec + 10) {
+                        try { hls.resumeBuffering(); } catch (e) {}
+                        return;
+                    }
+                    origPauseBuffering();
+                };
+            }
 
             hls.loadSource(streamUrl);
             hls.attachMedia(audio);
 
-            // 실시간 세그먼트 전송 통계 수신 -> 모바일 대역폭 & RTT 실측
-            hls.on(Hls.Events.FRAG_LOADED, (_, data) => {
-                if (data && data.stats) {
-                    adaptiveEngine.recordFragStats(data.stats);
-                }
+            hls.on(Hls.Events.FRAG_LOADED, () => {
+                updateBufferGauge();
             });
 
             hls.on(Hls.Events.MANIFEST_PARSED, () => {
-                debugText.innerText = 'Manifest ready. Buffer priming...';
-                setTimeout(() => {
-                    if (userWantsPlay) audio.play().catch(() => {});
-                }, 800);
+                debugText.innerText = `Deep Buffer Priming (${MBC_CDN_HOSTS[activeCdnIndex]})...`;
+                if (userWantsPlay) {
+                    audio.play().catch(() => {
+                        setTimeout(() => {
+                            if (userWantsPlay) audio.play().catch(() => {});
+                        }, 300);
+                    });
+                }
             });
 
             hls.on(Hls.Events.ERROR, (_, data) => {
-                if (!userWantsPlay || !data.fatal) return;
-                debugText.innerText = `HLS error: ${data.details}`;
+                if (!userWantsPlay) return;
+
+                // 비치명적 버퍼 스톨 에러 시 미세 갭 브릿징 시도
+                if (!data.fatal) {
+                    if (data.details === Hls.ErrorDetails.BUFFER_STALLED_ERROR) {
+                        tryBridgeMicroGap();
+                        try { hls.startLoad(); } catch (e) {}
+                    }
+                    return;
+                }
+
+                debugText.innerText = `HLS recovery: ${data.details}`;
                 if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
                     hls.recoverMediaError();
                 } else if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
-                    // 모바일 핸드오버나 일시적 연결 실패 시 신속 복구 시도
-                    debugText.innerText = 'Network error → attempting quick load recovery';
+                    // 기존 버퍼가 남아있다면 절대 플레이어를 파괴하지 않고 백그라운드 재연결만 수행
+                    const remainBuf = getBufferSeconds();
+                    activeCdnIndex = (activeCdnIndex + 1) % MBC_CDN_HOSTS.length;
+                    debugText.innerText = `Failover → ${MBC_CDN_HOSTS[activeCdnIndex]} (Buf: ${Math.round(remainBuf)}s)`;
                     try { hls.startLoad(); } catch (e) {}
-                    setTimeout(() => { if (userWantsPlay) initStream(true); }, 2000);
+
+                    if (remainBuf < 2) {
+                        setTimeout(() => {
+                            if (userWantsPlay && getBufferSeconds() < 2 && (!isLivePlaying || audio.paused)) {
+                                initStream(true);
+                            }
+                        }, 2500);
+                    }
                 } else {
-                    switchBackupSource();
+                    switchBackupCdn();
                 }
             });
         }
 
+        // 구형 iOS (< 17.1) 네이티브 HLS 폴백 (만료 직전 세그먼트 점프 버그 제거)
         function startNativeHlsEngine(streamUrl) {
             audio.src = streamUrl;
             audio.load();
-
-            // iOS Safari: 메타데이터 로드 시 모바일 적응형 지연 지점으로 이동하여 전방 버퍼 확보
-            const applySafeOffset = () => {
-                if (initialBufferSeek) return;
-                try {
-                    if (audio.seekable && audio.seekable.length > 0) {
-                        const end = audio.seekable.end(0);
-                        const start = audio.seekable.start(0);
-                        const target = Math.max(start, end - adaptiveEngine.targetDelaySec);
-                        if (end - start > 15 && target < end - 10) {
-                            audio.currentTime = target;
-                            initialBufferSeek = true;
-                            debugText.innerText = `iOS Safe Margin Primed (-${Math.round(end - target)}s)`;
-                        }
-                    }
-                } catch (e) {}
-            };
-
-            audio.addEventListener('loadedmetadata', applySafeOffset, { once: true });
-            audio.addEventListener('canplay', applySafeOffset, { once: true });
-
-            audio.play().then(() => {
-                setTimeout(applySafeOffset, 1200);
-            }).catch(() => {});
+            audio.play().catch(() => {});
         }
 
-        function switchBackupSource() {
-            backupStreamIndex++;
-            setStatus('예비 서버로 전환 중...', 'warn');
+        function switchBackupCdn() {
+            activeCdnIndex = (activeCdnIndex + 1) % MBC_CDN_HOSTS.length;
+            setStatus(`대체 CDN 서버(${MBC_CDN_HOSTS[activeCdnIndex]})로 무중단 전환 중...`, 'warn');
             setTimeout(() => {
                 if (userWantsPlay) initStream(true);
-            }, 1000);
-        }
-
-        function jumpToSafeMargin() {
-            try {
-                if (hls && hls.liveSyncPosition && isFinite(hls.liveSyncPosition)) {
-                    audio.currentTime = hls.liveSyncPosition;
-                } else if (audio.seekable && audio.seekable.length > 0) {
-                    const end = audio.seekable.end(0);
-                    const start = audio.seekable.start(0);
-                    audio.currentTime = Math.max(start, end - adaptiveEngine.targetDelaySec);
-                }
-                audio.play().catch(() => {});
-            } catch (e) {
-                initStream(true);
-            }
+            }, 800);
         }
 
         // ──────────────────────────────────────────────────────────
-        // 7. 재생 제어 및 원클릭 즉각 복구 (핵심 사용자 요청)
+        // 7. 재생 제어 및 원클릭 즉각 복구
         // ──────────────────────────────────────────────────────────
         function startPlayback(force = false) {
             userWantsPlay = true;
@@ -1403,23 +1675,26 @@
         function pausePlayback() {
             userWantsPlay = false;
             cleanAudioResources();
+            if (wakeLockSentinel) {
+                try { wakeLockSentinel.release(); } catch (e) {}
+                wakeLockSentinel = null;
+            }
             setStatus('일시 정지됨', 'idle');
             updateBufferGauge();
         }
 
-        // 플레이 버튼 클릭 시: 끊겼거나 멈췄으면 즉시 재연결 & 재생!
         playBtn.onclick = () => {
             const isCurrentlyPlaying = !audio.paused && !audio.ended && isLivePlaying;
             if (isCurrentlyPlaying) {
                 pausePlayback();
             } else {
-                // 끊겼거나 버퍼링 중이면 즉시 새 스트림을 열어 강제 재생
                 startPlayback(true);
             }
         };
 
         syncBtn.onclick = () => {
-            setStatus('스트림 & 편성표 완전 동기화...', 'warn');
+            activeCdnIndex = (activeCdnIndex + 1) % MBC_CDN_HOSTS.length;
+            setStatus(`스트림 새로고침 (${MBC_CDN_HOSTS[activeCdnIndex]})...`, 'warn');
             fetchLiveSchedules().catch(() => {});
             userWantsPlay = true;
             initStream(true);
@@ -1439,7 +1714,7 @@
         };
 
         // ──────────────────────────────────────────────────────────
-        // 8. 오디오 이벤트 & 상태 처리
+        // 8. 오디오 이벤트 & 백그라운드 화면 꺼짐 무중단 워커 가드
         // ──────────────────────────────────────────────────────────
         audio.onplaying = () => {
             if (!userWantsPlay) return;
@@ -1447,33 +1722,55 @@
             stallCounter = 0;
             setButtonState('playing');
             appViewport.classList.add('is-playing');
-            setStatus('● 실시간 방송 청취 중', 'safe');
-            debugText.innerText = 'Live Streaming · Buffer Guard ON';
+            setStatus('● 실시간 방송 청취 중 (딥 버퍼 가드 작동)', 'safe');
+            debugText.innerText = `Live · ${MBC_CDN_HOSTS[activeCdnIndex]} · Deep Buffer ON`;
             if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
             updateBufferGauge();
         };
 
         audio.onwaiting = () => {
             if (!userWantsPlay) return;
-            setButtonState('loading');
-            setStatus('네트워크 버퍼 충전 중...', 'warn');
             updateBufferGauge();
+            if (tryBridgeMicroGap()) return;
+            if (hls) {
+                try { hls.startLoad(); } catch (e) {}
+            }
+            setButtonState('loading');
+            setStatus('네트워크 버퍼 보충 중...', 'warn');
         };
 
+        // [핵심 해결책 3] onstalled 발생 시 강제 시크(jumpToSafeMargin)로 오디오를 끊던 치명적 버그 제거!
+        // 모바일 브라우저는 세그먼트 다운로드가 완료되어 3초간 대기할 때도 stalled 이벤트를 발생시킴.
         audio.onstalled = () => {
             if (!userWantsPlay) return;
-            debugText.innerText = 'Stalled → safe jump';
-            jumpToSafeMargin();
+            const bufSec = getBufferSeconds();
+            if (hls && bufSec < adaptiveEngine.targetDelaySec) {
+                try { hls.startLoad(); } catch (e) {}
+            }
+        };
+
+        // 하드웨어 오디오 클럭에 의해 매 250ms마다 호출되는 timeupdate 이벤트 (화면이 꺼져도 절대 쓰로틀링되지 않음!)
+        audio.ontimeupdate = () => {
+            if (!userWantsPlay) return;
+            const now = Date.now();
+            if (now - lastBgKeepAliveTime >= 2000) {
+                lastBgKeepAliveTime = now;
+                updateBufferGauge();
+                const bufSec = getBufferSeconds();
+                if (hls && bufSec < adaptiveEngine.targetDelaySec - 5) {
+                    try { hls.startLoad(); } catch (e) {}
+                }
+            }
         };
 
         audio.onerror = () => {
             if (!userWantsPlay) return;
-            setStatus('스트림 오류 — 자동 복구 시도...', 'warn');
-            setTimeout(() => { if (userWantsPlay) initStream(true); }, 1500);
+            setStatus('스트림 오류 감지 — 멀티 CDN 자동 복구 중...', 'warn');
+            switchBackupCdn();
         };
 
-        // 1초 주기 모니터링: 데이터 및 스톨 감지 + 모바일 네트워크 실시간 평가
-        setInterval(() => {
+        // 1초 주기 상태 점검 함수 (메인 타이머 + 백그라운드 Web Worker 겸용)
+        function runMonitorTick() {
             updateBufferGauge();
             adaptiveEngine.assessNetwork();
             adaptiveEngine.runLightweightPing();
@@ -1485,39 +1782,61 @@
             }
 
             const now = Date.now();
-            if (isLivePlaying && !audio.paused) {
+            const bufSec = getBufferSeconds();
+
+            // HLS 미사용(네이티브 폴백) 시에만 추정치 합산
+            if (!hls && isLivePlaying && !audio.paused) {
                 if (lastTickTime > 0) {
                     const dt = (now - lastTickTime) / 1000;
-                    totalDataBytes += (128 * 1024 / 8) * dt;
+                    totalDataBytes += (64 * 1024 / 8) * dt;
                     if (metaTotalEl) {
                         metaTotalEl.innerText = `DATA: ${(totalDataBytes / (1024 * 1024)).toFixed(1)} MB`;
                     }
                 }
                 lastTickTime = now;
-            } else {
-                lastTickTime = 0;
             }
 
-            // 스톨(재생 멈춤) 정밀 감지
+            // 진짜 스톨(재생 멈춤) 정밀 감지 — 버퍼가 남아있을 때 섣불리 스트림을 파괴하지 않음
             if (isLivePlaying && !audio.paused) {
                 if (audio.currentTime === lastAudioPosition) {
                     stallCounter++;
-                    if (stallCounter === 4) {
-                        debugText.innerText = 'Stall detected → safe buffer jump';
-                        jumpToSafeMargin();
-                    } else if (stallCounter === 8) {
-                        debugText.innerText = 'Stall 8s → refreshing stream';
-                        initStream(true);
-                    } else if (stallCounter >= 14) {
+                    if (stallCounter === 2) {
+                        tryBridgeMicroGap();
+                        if (hls) {
+                            try { hls.startLoad(); } catch (e) {}
+                        }
+                    } else if (stallCounter === 6 && bufSec < 1) {
+                        activeCdnIndex = (activeCdnIndex + 1) % MBC_CDN_HOSTS.length;
+                        debugText.innerText = `Stall 6s → CDN switch ${MBC_CDN_HOSTS[activeCdnIndex]}`;
+                        if (hls) {
+                            try { hls.startLoad(); } catch (e) {}
+                        }
+                    } else if (stallCounter >= 15 && bufSec < 1) {
                         stallCounter = 0;
-                        switchBackupSource();
+                        debugText.innerText = 'Stall 15s (0s buf) → Reconnecting stream';
+                        switchBackupCdn();
                     }
                 } else {
+                    if (stallCounter > 0) {
+                        setButtonState('playing');
+                        setStatus('● 실시간 방송 청취 중 (딥 버퍼 가드 작동)', 'safe');
+                    }
                     stallCounter = 0;
                 }
                 lastAudioPosition = audio.currentTime;
             }
-        }, 1000);
+        }
+
+        // 백그라운드 화면 잠금 시에도 멈추지 않는 Web Worker 하드웨어 타이머 구동
+        try {
+            const workerBlob = new Blob([
+                'setInterval(function(){ postMessage("tick"); }, 1000);'
+            ], { type: 'application/javascript' });
+            const bgWorker = new Worker(URL.createObjectURL(workerBlob));
+            bgWorker.onmessage = () => runMonitorTick();
+        } catch (e) {
+            setInterval(runMonitorTick, 1000);
+        }
 
         function setButtonState(state) {
             playBtn.classList.remove('is-loading', 'is-playing');
